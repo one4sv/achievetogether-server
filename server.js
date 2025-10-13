@@ -35,7 +35,7 @@ process.stderr.setDefaultEncoding('utf8');
 const app = express();
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'https://achievetogether.vercel.app',
   credentials: true
 }));
 
