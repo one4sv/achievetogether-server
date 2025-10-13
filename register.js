@@ -72,14 +72,6 @@ export default function(app, supabase) {
                 return res.status(500).json({ success: false, error: "Ошибка регистрации" });
             }
             const link = `${process.env.CLIENT_URL}/confirm?token=${token}`;
-            const transporter = nodemailer.createTransport({
-                host: "smtp.sendgrid.net",
-                port: 587,
-                auth: {
-                    user: "apikey",               // всегда так для SendGrid
-                    pass: process.env.API_SENDGRID // твой SendGrid API key в переменной окружения
-                }
-            });
             const html = `
                 <h2>Привет, ${nick}!</h2>
                 <p>Для завершения регистрации нажми на ссылку ниже:</p>
