@@ -14,7 +14,7 @@ oAuth2Client.setCredentials({
 });
 
 // Функция отправки письма
-export async function sendMail(to, subject, html) {
+export async function sendEmail(to, subject, html) {
   const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
 
   const message = [
