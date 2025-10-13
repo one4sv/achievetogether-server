@@ -65,10 +65,11 @@ export default function(app, supabase) {
       const link = `${process.env.CLIENT_URL}/confirm?token=${token}`;
 
       const transporter = nodemailer.createTransport({
-        service: "gmail",
+        host: "smtp.sendgrid.net",
+        port: 587,
         auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS
+          user: "apikey",               // всегда так для SendGrid
+          pass: process.env.API_SENDGRID // твой SendGrid API key в переменной окружения
         }
       });
 
