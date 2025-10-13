@@ -105,4 +105,7 @@ export default function (app, supabase) {
       return res.status(500).json({ success: false, error: "Внутренняя ошибка сервера" });
     }
   });
+  app.get('/confirm', (req, res) => {
+    res.send('Confirm AT server is running');
+  });
 }
