@@ -106,6 +106,7 @@ export default function (app, supabase) {
       return res.status(200).json({ success: true, message: "Вы успешно зарегистрированы и авторизованы" });
 
     } catch (err) {
+      console.log("ошибка биля")
       console.error("Ошибка при подтверждении:", err);
       return res.status(500).json({ success: false, error: "Внутренняя ошибка сервера" });
     }
