@@ -95,15 +95,15 @@ export default function (app, supabase) {
       await supabase.from("pending_users").delete().eq("id", pendingUser.id);
 
       // JWT
+      const jwtToken = jwt.sign({ id: newUser.id }, SECRET, { expiresIn: "30d" });
+      console.log("Sending cookie:", jwtToken);
+
       res.setHeader("Access-Control-Allow-Origin", process.env.CLIENT_URL);
       res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.cookie("token", jwtToken, { httpOnly: true, secure: true, sameSite: "none", maxAge: 30*24*60*60*1000 });
       console.log("Set-Cookie header:", res.getHeader("Set-Cookie"));
 
-      const jwtToken = jwt.sign({ id: newUser.id }, SECRET, { expiresIn: "30d" });
       res.cookie("token", jwtToken, { httpOnly: true, secure: true, sameSite: "none", maxAge: 30*24*60*60*1000 });
       console.log(res.getHeader("Set-Cookie"));
-      console.log("Sending cookie:", jwtToken);
       return res.status(200).json({ success: true, message: "Вы успешно зарегистрированы и авторизованы" });
 
     } catch (err) {
