@@ -6,6 +6,7 @@ const SECRET = process.env.JWT_SECRET;
 
 export default function (app, supabase) {
   app.post("/confirm", async (req, res) => {
+    console.log("go confirm")
     const { token } = req.body;
     if (!token) return res.status(400).json({ success: false, error: "Токен обязателен" });
 
