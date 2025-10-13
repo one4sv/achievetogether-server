@@ -70,7 +70,6 @@ export default function(app, supabase) {
 
       // Отправка через SendGrid
       await sendEmail(user.mail, "Подтверждение авторизации", mailHtml);
-      console.log("Mail has been sent to", user.mail);
 
       res.status(200).json({
         success: true,
