@@ -98,18 +98,20 @@ export default function (app, supabase) {
         habits: "all",
         number: "contacts"
       };
+
+      // Правильный вариант — передаём массивы и объекты напрямую
       await supabase.from("settings").insert({
         user_id: newUser.id,
-        order: JSON.stringify(["everyday", "weekly", "sometimes"]),
-        amountHabits: JSON.stringify([5,5,5,5,5]),
-        private: JSON.stringify(defaultPrivate),
+        order: ["everyday", "weekly", "sometimes"],       // массив, без JSON.stringify
+        amountHabits: [5, 5, 5, 5, 5],                   // массив чисел, без JSON.stringify
+        private: defaultPrivate,                          // объект, без JSON.stringify
         theme: "system",
         decor: "default",
         acsent: "poison",
         bg: "default",
         bg_url: null
       });
-      console.log("✅ Настройки вставлены");
+      console.log("✅ Настройки вставлены корректно");
 
       // Удаляем pending
       await supabase.from("pending_users").delete().eq("id", pendingUser.id);
