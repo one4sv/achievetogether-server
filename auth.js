@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
-import { sendEmail } from "./sendgrid.js"; // твой модуль с API
+import { sendMail } from "./sendmail.js"; // твой модуль с API
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -69,7 +69,7 @@ export default function(app, supabase) {
       `;
 
       // Отправка через SendGrid
-      await sendEmail(user.mail, "Подтверждение авторизации", mailHtml);
+      await sendMail(user.mail, "Подтверждение авторизации", mailHtml);
 
       res.status(200).json({
         success: true,

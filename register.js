@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
-import { sendEmail } from "./sendgrid.js"; // твой модуль с API
+import { sendMail } from "./sendmail.js"; // твой модуль с API
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -87,7 +87,7 @@ export default function(app, supabase) {
                 <p>Если это были не вы — просто проигнорируйте это письмо.</p>
             `;
 
-            await sendEmail(mail, "Подтверждение регистрации", html);
+            await sendMail(mail, "Подтверждение регистрации", html);
 
             res.status(200).json({ success: true, message: "Письмо с подтверждением отправлено" });
 
