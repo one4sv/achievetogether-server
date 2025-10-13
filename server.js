@@ -35,9 +35,10 @@ process.stderr.setDefaultEncoding('utf8');
 const app = express();
 
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
 }));
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -75,7 +76,7 @@ const server = createServer(app);
 initWebSocket(supabase, server);
 
 // Запуск сервера
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
