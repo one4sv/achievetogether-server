@@ -13,14 +13,19 @@ oAuth2Client.setCredentials({
   refresh_token: process.env.GOOGLE_REFRESH_TOKEN
 });
 
+// Функция кодирования заголовков в Base64 для Gmail
+function encodeUTF8Base64(str) {
+  return `=?UTF-8?B?${Buffer.from(str, "utf-8").toString("base64")}?=`;
+}
+
 // Функция отправки письма
-export async function sendEmail(to, subject, html) {
+export async function sendMail(to, subject, html) {
   const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
 
   const message = [
     `To: ${to}`,
     "Content-Type: text/html; charset=UTF-8",
-    `Subject: ${subject}`,
+    `Subject: ${encodeUTF8Base64(subject)}`,
     "",
     html
   ].join("\n");
