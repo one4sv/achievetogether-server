@@ -8,7 +8,7 @@ export async function sendEmail(to, subject, html) {
   try {
     await sgMail.send({
       to,
-      from: "no-reply@achievetogether.com",
+      from: "sasha.kutenko@yandex.ru",
       subject,
       html
     });
