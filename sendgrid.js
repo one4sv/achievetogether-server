@@ -1,19 +1,26 @@
-import sgMail from "@sendgrid/mail";
+import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 dotenv.config();
 
-sgMail.setApiKey(process.env.API_SENDGRID);
-
 export async function sendEmail(to, subject, html) {
   try {
-    await sgMail.send({
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,       // твой Gmail
+        pass: process.env.EMAIL_PASS     // пароль приложения
+      }
+    });
+
+    await transporter.sendMail({
+      from: `"AchieveTogether" <${process.env.GMAIL_EMAIL}>`,
       to,
-      from: "sasha.kutenko@yandex.ru",
       subject,
       html
     });
+
     console.log("✅ Email sent to", to);
   } catch (err) {
-    console.error("❌ SendGrid API error:", err);
+    console.error("❌ Gmail SMTP error:", err);
   }
 }
