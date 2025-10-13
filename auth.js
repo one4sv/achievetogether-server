@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
-import nodemailer from "nodemailer";
+import { sendEmail } from "./sendgrid.js"; // твой модуль с API
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -29,7 +29,7 @@ export default function(app, supabase) {
         return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
       }
 
-      // Проверяем, есть ли в auth_tokens неистёкший токен для этого пользователя
+      // Проверяем существующие токены
       const now = new Date().toISOString();
       const { data: existingTokens, error: tokenFetchError } = await supabase
         .from("auth_tokens")
@@ -45,10 +45,8 @@ export default function(app, supabase) {
 
       let token;
       if (existingTokens && existingTokens.length > 0) {
-        // Есть действующий токен — переиспользуем его
-        token = existingTokens[0].token;
+        token = existingTokens[0].token; // Переиспользуем действующий токен
       } else {
-        // Создаём новый токен
         token = randomUUID();
         const expiresAt = new Date(Date.now() + 24*60*60*1000).toISOString();
 
@@ -63,35 +61,16 @@ export default function(app, supabase) {
       }
 
       const link = `${process.env.CLIENT_URL}/confirm?token=${token}`;
+      const mailHtml = `
+        <h2>Привет, ${user.nick}!</h2>
+        <p>Для завершения авторизации нажми на ссылку ниже:</p>
+        <a href="${link}">Подтвердить авторизацию</a>
+        <p>Если авторизовывались не вы — смените пароль.</p>
+      `;
 
-      const transporter = nodemailer.createTransport({
-        host: "smtp.sendgrid.net",
-        port: 587,
-        auth: {
-          user: "apikey",               // всегда так для SendGrid
-          pass: process.env.API_SENDGRID // твой SendGrid API key в переменной окружения
-        }
-      });
-
-      const mailOptions = {
-        from: `"AchieveTogether" <${process.env.EMAIL_USER}>`,
-        to: user.mail,
-        subject: "Подтверждение авторизации",
-        html: `
-          <h2>Привет, ${user.nick}!</h2>
-          <p>Для завершения авторизации нажми на ссылку ниже:</p>
-          <a href="${link}">Подтвердить авторизацию</a>
-          <p>Если авторизовывались не вы — смените пароль.</p>
-        `
-      };
-
-      try {
-        await transporter.sendMail(mailOptions);
-        console.log("Mail has been sent", user.mail);
-      } catch (mailError) {
-        console.error("Ошибка отправки письма:", mailError);
-        return res.status(500).json({ success: false, error: "Ошибка отправки письма" });
-      }
+      // Отправка через SendGrid
+      await sendEmail(user.mail, "Подтверждение авторизации", mailHtml);
+      console.log("Mail has been sent to", user.mail);
 
       res.status(200).json({
         success: true,
@@ -99,6 +78,7 @@ export default function(app, supabase) {
       });
 
     } catch (err) {
+      console.error("Auth error:", err);
       res.status(500).json({ success: false, error: err.message || "Ошибка сервера" });
     }
   });

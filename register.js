@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
-import nodemailer from "nodemailer";
+import { sendEmail } from "./sendgrid.js"; // твой модуль с API
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -80,34 +80,20 @@ export default function(app, supabase) {
                     pass: process.env.API_SENDGRID // твой SendGrid API key в переменной окружения
                 }
             });
-            const mailOptions = {
-            from: `"AchieveTogether" <${process.env.EMAIL_USER}>`,
-            to: mail,
-            subject: "Подтверждение регистрации",
-            html: `
+            const html = `
                 <h2>Привет, ${nick}!</h2>
                 <p>Для завершения регистрации нажми на ссылку ниже:</p>
                 <a href="${link}">Подтвердить аккаунт</a>
                 <p>Если это были не вы — просто проигнорируйте это письмо.</p>
-            `
-            };
-            try {
-                await transporter.sendMail(mailOptions);
-                console.log("Mail has been sent", mail);
-            } catch (mailError) {
-                console.error("Error mail send:", mailError);
-                return res.status(500).json({ success: false, error: "Ошибка отправки письма" });
-            }
-            res.status(200).json({
-                success: true,
-                message: "Письмо с подтверждением отправлено"
-            });
+            `;
+
+            await sendEmail(mail, "Подтверждение регистрации", html);
+
+            res.status(200).json({ success: true, message: "Письмо с подтверждением отправлено" });
+
         } catch (err) {
-            console.error("Registration exception:", err);
-            res.status(500).json({
-                success: false,
-                error: err.message || "Ошибка регистрации"
-            });
+            console.error("Registration error:", err);
+            res.status(500).json({ success: false, error: err.message || "Ошибка регистрации" });
         }
     });
 }
