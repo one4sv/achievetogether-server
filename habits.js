@@ -45,14 +45,10 @@ export default function (app, supabase) {
             }
 
             // текущая дата
-            const now = new Date().toLocaleDateString("en-CA", {
+            const today = new Date().toLocaleDateString("en-CA", {
                 timeZone: "Europe/Moscow"
             });
-            const today = `${now.getFullYear()}-${String(
-                now.getMonth() + 1
-            ).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-            console.log(today)
-            console.log(now)
+            console.log(today); // '2025-10-15'
             // проверяем выполнение + комментарий
             const { data: completion, error: completionError } = await supabase
                 .from("habit_completions")
