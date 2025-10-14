@@ -36,20 +36,43 @@ export default function (app, supabase) {
           // Берём последние сообщения
           const { data: messages } = await supabase
             .from("messages")
-            .select("id, chat_id, sender_id, content, created_at")
+            .select("id, chat_id, sender_id, content, created_at, read_by")
             .in("chat_id", chatIds)
             .order("created_at", { ascending: false });
 
-          (messages || []).forEach(msg => {
+          const messageIds = messages?.map(m => m.id) || [];
+
+          const { data: files } = await supabase
+            .from("message_files")
+            .select("id, message_id, file_url, file_type, file_name, file_size")
+            .in("message_id", messageIds);
+
+          // Привязываем файлы к сообщениям
+          const messagesWithFiles = (messages || []).map(msg => ({
+            ...msg,
+            files: (files || []).filter(f => f.message_id === msg.id)
+          }));
+
+          (messagesWithFiles || []).forEach(msg => {
             if (!lastMessages[msg.chat_id]) lastMessages[msg.chat_id] = msg;
           });
 
           // Добавляем lastMessage каждому пользователю
           usersInChats = usersInChats.map(user => {
             const chat = otherUsers.find(c => c.user_id === user.id);
+            const lastMessage = chat ? lastMessages[chat.chat_id] || null : null;
+
+            // Подсчёт непрочитанных сообщений
+            let unread_count = 0;
+            if (chat) {
+              const chatMessages = messagesWithFiles.filter(m => m.chat_id === chat.chat_id && m.sender_id === user.id);
+              unread_count = chatMessages.filter(m => !m.read_by.includes(id)).length;
+            }
+
             return {
               ...user,
-              lastMessage: chat ? lastMessages[chat.chat_id] || null : null
+              lastMessage,
+              unread_count
             };
           });
         }
