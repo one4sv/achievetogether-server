@@ -49,7 +49,8 @@ export default function (app, supabase) {
             const today = `${now.getFullYear()}-${String(
                 now.getMonth() + 1
             ).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-
+            console.log(today)
+            console.log(now)
             // проверяем выполнение + комментарий
             const { data: completion, error: completionError } = await supabase
                 .from("habit_completions")
