@@ -1,12 +1,18 @@
 import { authenticateUser } from "./middleware/token.js";
+import multer from "multer";
+import { broadcastNewMessage } from "./ws.js"; // Импорт для бродкаста через WS
+import crypto from "crypto";
+import path from "path";
 
 export default function (app, supabase) {
+  const upload = multer({ storage: multer.memoryStorage() });
+
   // Проверка API
   app.get("/chat", (req, res) => {
     res.send("Chat api is working...");
   });
 
-  // Получить чат и сообщения
+  // Получить чат и сообщения (обновлено для файлов в сообщениях)
   app.get("/chat/:id", authenticateUser(supabase), async (req, res) => {
     const { id } = req.user; // текущий пользователь
     const chatWithId = req.params.id; // собеседник
@@ -48,10 +54,18 @@ export default function (app, supabase) {
       if (chatId) {
         const { data: msgs } = await supabase
           .from("messages")
-          .select("id, sender_id, content, created_at")
+          .select("id, sender_id, content, created_at, message_files(file_url, file_name, file_type)")
           .eq("chat_id", chatId)
           .order("created_at", { ascending: true });
-        messages = msgs || [];
+        // Преобразование для клиента
+        messages = (msgs || []).map(msg => ({
+          ...msg,
+          files: msg.message_files ? msg.message_files.map(f => ({
+            url: f.file_url,
+            name: f.file_name,
+            type: f.file_type
+          })) : []
+        }));
       }
 
       res.json({
@@ -60,7 +74,7 @@ export default function (app, supabase) {
           username: chatWith.username,
           nick: chatWith.nick,
           avatar_url: chatWith.avatar_url,
-          last_online:chatWith.last_online
+          last_online: chatWith.last_online
         },
         messages,
       });
@@ -70,13 +84,14 @@ export default function (app, supabase) {
     }
   });
 
-  // Отправка сообщения
-  app.post("/chat", authenticateUser(supabase), async (req, res) => {
+  // Отправка сообщения (с поддержкой файлов)
+  app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
     const { id } = req.user;
-    let { receiver_id, text } = req.body;
+    const { receiver_id, text } = req.body;
+    const files = req.files || [];
 
-    if (!text) {
-      return res.status(400).json({ success: false, error: "Текст пустой" });
+    if ((!text || !text.trim()) && files.length === 0) {
+      return res.status(400).json({ success: false, error: "Сообщение пустое" });
     }
 
     try {
@@ -118,11 +133,51 @@ export default function (app, supabase) {
       // Добавляем сообщение
       const { data: message } = await supabase
         .from("messages")
-        .insert([{ chat_id: chatId, sender_id: id, content: text }])
+        .insert([{ chat_id: chatId, sender_id: id, content: text || "" }])
         .select()
         .single();
 
-      res.json({ success: true, message });
+      let filesData = [];
+      if (files.length > 0) {
+        for (const file of files) {
+          const ext = path.extname(file.originalname); // Получаем расширение
+          const uniqueName = crypto.randomUUID() + ext; // Генерируем уникальное имя с расширением
+          const filePath = `${id}/${uniqueName}`;
+          const { error: uploadError } = await supabase.storage
+            .from("media")
+            .upload(filePath, file.buffer, { contentType: file.mimetype });
+
+          if (uploadError) {
+            throw uploadError;
+          }
+
+          const { data: { publicUrl } } = supabase.storage
+            .from("media")
+            .getPublicUrl(filePath);
+
+          filesData.push({
+            message_id: message.id,
+            file_url: publicUrl,
+            file_name: file.originalname, // Оригинальное имя для клиента
+            file_type: file.mimetype.substring(0, 50), // Обрезаем до 50 символов
+            file_size: file.size
+          });
+        }
+
+        const { error: insertError } = await supabase.from("message_files").insert(filesData);
+        if (insertError) {
+          console.error("Ошибка вставки файлов:", insertError);
+          throw insertError;
+        }
+      }
+
+      // Формируем сообщение с файлами
+      const messageWithFiles = { ...message, files: filesData.map(f => ({ url: f.file_url, name: f.file_name, type: f.file_type })) };
+
+      // Бродкаст через WS
+      broadcastNewMessage(chatId, messageWithFiles);
+
+      res.json({ success: true, message: messageWithFiles });
     } catch (err) {
       console.error("Ошибка при отправке сообщения:", err);
       res.status(500).json({ success: false, error: "Ошибка сервера" });
