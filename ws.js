@@ -21,6 +21,28 @@ export function broadcastNewMessage(chat_id, message) {
       });
     });
 }
+export function broadcastMessageRead(chat_id, messageId, userId) {
+  supabaseGlobal
+    .from("chat_members")
+    .select("user_id")
+    .eq("chat_id", chat_id)
+    .then(({ data: members }) => {
+      members?.forEach(member => {
+        const sockets = clientsMap.get(member.user_id);
+        sockets?.forEach(s => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({
+              type: "MESSAGE_READ",
+              chatId: chat_id,
+              messageId,
+              userId
+            }));
+          }
+        });
+      });
+    });
+}
+
 
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
