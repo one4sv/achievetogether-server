@@ -42,7 +42,20 @@ export function broadcastMessageRead(chat_id, messageId, userId) {
       });
     });
 }
-
+export function broadcastReaction(payload) {
+  const { messageId, user_id, reaction, removed } = payload;
+  for (const [userId, sockets] of clientsMap.entries()) {
+    sockets.forEach(ws => {
+      ws.send(JSON.stringify({
+        type: "MESSAGE_REACTION",
+        messageId,
+        user_id,
+        reaction,
+        removed // <-- добавили
+      }));
+    });
+  }
+}
 
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
@@ -86,11 +99,14 @@ export default function initWebSocket(supabase, server) {
       }
     }, 60000);
     ws.on("message", async (msg) => {
-      try {
-        const data = JSON.parse(msg.toString());
-        // Нет обработки SEND_MESSAGE, всё через HTTP
-      } catch (err) {
-        console.error("WS message error:", err);
+      const data = JSON.parse(msg.toString());
+      if (data.type === "TYPING" || data.type === "STOP_TYPING") {
+        const targetSockets = clientsMap.get(data.to);
+        targetSockets?.forEach(s => {
+            if (s.readyState === WebSocket.OPEN) {
+                s.send(JSON.stringify({ ...data, from: userId }));
+            }
+        });
       }
     });
     ws.on("close", async () => {

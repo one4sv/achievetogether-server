@@ -54,7 +54,7 @@ export default function (app, supabase) {
       if (chatId) {
         const { data: msgs } = await supabase
           .from("messages")
-          .select("id, sender_id, content, created_at, message_files(file_url, file_name, file_type), read_by")
+          .select("id, sender_id, content, created_at, message_files(file_url, file_name, file_type), read_by, reactions")
           .eq("chat_id", chatId)
           .order("created_at", { ascending: true });
         // Преобразование для клиента
