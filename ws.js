@@ -4,23 +4,54 @@ let clientsMap = new Map(); // userId -> Set(ws)
 let supabaseGlobal; // to share supabase
 let broadcastUserStatus; // forward declaration
 
-export function broadcastNewMessage(chat_id, message) {
-  supabaseGlobal
-    .from("chat_members")
-    .select("user_id")
-    .eq("chat_id", chat_id)
-    .then(({ data: members }) => {
-      members?.forEach(member => {
-        const targetId = member.user_id;
-        const sockets = clientsMap.get(targetId);
-        sockets?.forEach(s => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({ type: "NEW_MESSAGE", chatId: chat_id, message }));
-          }
-        });
+export async function broadcastNewMessage(chat_id, message) {
+  try {
+    // Получаем id отправителя
+    const senderId = message.sender_id;
+
+    // Получаем ник и username из таблицы users
+    const { data: senderData, error: senderError } = await supabaseGlobal
+      .from("users")
+      .select("nick, username")
+      .eq("id", senderId)
+      .single();
+
+    if (senderError) {
+      console.error("Ошибка получения данных отправителя:", senderError);
+    }
+
+    // Получаем участников чата
+    const { data: members, error: membersError } = await supabaseGlobal
+      .from("chat_members")
+      .select("user_id")
+      .eq("chat_id", chat_id);
+
+    if (membersError) {
+      console.error("Ошибка получения участников:", membersError);
+      return;
+    }
+
+    // Рассылаем сообщение всем участникам
+    members?.forEach(member => {
+      const targetId = member.user_id;
+      const sockets = clientsMap.get(targetId);
+      sockets?.forEach(s => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: "NEW_MESSAGE",
+            chatId: chat_id,
+            message,
+            nick: senderData?.nick || null,
+            username: senderData?.username || null
+          }));
+        }
       });
     });
+  } catch (err) {
+    console.error("Ошибка в broadcastNewMessage:", err);
+  }
 }
+
 export function broadcastMessageRead(chat_id, messageId, userId) {
   supabaseGlobal
     .from("chat_members")

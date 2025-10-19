@@ -2,14 +2,14 @@ import { authenticateUser } from "./middleware/token.js"
 
 export default function (app, supabase) {
     app.post('/updatesettings', authenticateUser(supabase), async (req, res) => {
-        const setting = Object.keys(req.body)[0]; // например: "order" или "nick"
+        const setting = Object.keys(req.body)[0];
         const value = req.body[setting];
 
         const { id } = req.user;
         if (!id) return res.status(401).json({ error: 'User not authenticated' });
 
         try {
-            if (['order', 'amountHabits', 'theme', 'private', 'acsent', 'bg', 'decor'].includes(setting)) {
+            if (['order', 'amountHabits', 'theme', 'private', 'acsent', 'bg', 'decor', 'note', 'mess_note'].includes(setting)) {
                 const { error } = await supabase
                     .from('settings')
                     .upsert({

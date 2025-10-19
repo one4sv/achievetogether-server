@@ -23,6 +23,7 @@ import calendarRoutes from "./calendar.js"
 import daycommentRoutes from "./daycomment.js"
 import pingRoutes from "./ping.js"
 import reactionsRoutes from "./reaction.js"
+import askauthRoutes from "./askauth.js"
 
 import { createClient } from "@supabase/supabase-js";
 import initWebSocket from "./ws.js";
@@ -71,6 +72,7 @@ calendarRoutes(app, supabase);
 daycommentRoutes(app, supabase);
 pingRoutes(app, supabase);
 reactionsRoutes(app, supabase);
+askauthRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);
