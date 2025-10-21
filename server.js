@@ -24,6 +24,8 @@ import daycommentRoutes from "./daycomment.js"
 import pingRoutes from "./ping.js"
 import reactionsRoutes from "./reaction.js"
 import askauthRoutes from "./askauth.js"
+import addpostRoutes from "./addpost.js"
+import postsRoutes from "./posts.js"
 
 import { createClient } from "@supabase/supabase-js";
 import initWebSocket from "./ws.js";
@@ -73,6 +75,8 @@ daycommentRoutes(app, supabase);
 pingRoutes(app, supabase);
 reactionsRoutes(app, supabase);
 askauthRoutes(app, supabase);
+addpostRoutes(app, supabase);
+postsRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);

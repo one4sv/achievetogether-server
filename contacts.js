@@ -11,61 +11,73 @@ export default function (app, supabase) {
         .from("chat_members")
         .select("chat_id")
         .eq("user_id", id);
-      const chatIds = chat_members?.map(c => c.chat_id) || [];
+
+      const chatIds = Array.isArray(chat_members) ? chat_members.map(c => c.chat_id) : [];
 
       let usersInChats = [];
       const lastMessages = {};
 
       if (chatIds.length > 0) {
+        // Получаем всех участников этих чатов кроме текущего пользователя
         const { data: otherUsers } = await supabase
           .from("chat_members")
           .select("chat_id, user_id")
           .in("chat_id", chatIds)
           .neq("user_id", id);
 
-        const uniqueUserIds = [...new Set(otherUsers.map(u => u.user_id))];
+        const safeOtherUsers = Array.isArray(otherUsers) ? otherUsers : [];
+
+        // Уникальные пользователи
+        const uniqueUserIds = [...new Set(safeOtherUsers.map(u => u.user_id))];
 
         if (uniqueUserIds.length > 0) {
+          // Получаем данные пользователей
           const { data: users } = await supabase
             .from("users")
             .select("id, username, nick, avatar_url")
             .in("id", uniqueUserIds);
 
-          usersInChats = users || [];
+          usersInChats = Array.isArray(users) ? users : [];
 
-          // Берём последние сообщения
+          // Получаем последние сообщения
           const { data: messages } = await supabase
             .from("messages")
             .select("id, chat_id, sender_id, content, created_at, read_by")
             .in("chat_id", chatIds)
             .order("created_at", { ascending: false });
 
-          const messageIds = messages?.map(m => m.id) || [];
+          const safeMessages = Array.isArray(messages) ? messages : [];
+          const messageIds = safeMessages.map(m => m.id);
 
+          // Получаем файлы сообщений
           const { data: files } = await supabase
             .from("message_files")
             .select("id, message_id, file_url, file_type, file_name, file_size")
             .in("message_id", messageIds);
 
+          const safeFiles = Array.isArray(files) ? files : [];
+
           // Привязываем файлы к сообщениям
-          const messagesWithFiles = (messages || []).map(msg => ({
+          const messagesWithFiles = safeMessages.map(msg => ({
             ...msg,
-            files: (files || []).filter(f => f.message_id === msg.id)
+            files: safeFiles.filter(f => f.message_id === msg.id)
           }));
 
-          (messagesWithFiles || []).forEach(msg => {
+          // Берём последнее сообщение для каждого чата
+          messagesWithFiles.forEach(msg => {
             if (!lastMessages[msg.chat_id]) lastMessages[msg.chat_id] = msg;
           });
 
-          // Добавляем lastMessage каждому пользователю
+          // Добавляем lastMessage и unread_count каждому пользователю
           usersInChats = usersInChats.map(user => {
-            const chat = otherUsers.find(c => c.user_id === user.id);
+            const chat = safeOtherUsers.find(c => c.user_id === user.id);
             const lastMessage = chat ? lastMessages[chat.chat_id] || null : null;
 
-            // Подсчёт непрочитанных сообщений
             let unread_count = 0;
             if (chat) {
-              const chatMessages = messagesWithFiles.filter(m => m.chat_id === chat.chat_id && m.sender_id === user.id);
+              const chatMessages = messagesWithFiles.filter(
+                m => m.chat_id === chat.chat_id && m.sender_id === user.id
+              );
               unread_count = chatMessages.filter(m => !m.read_by.includes(id)).length;
             }
 
@@ -98,21 +110,23 @@ export default function (app, supabase) {
           .or(`username.ilike.%${search}%,nick.ilike.%${search}%`)
           .neq("id", id);
 
+        const safeUsers = Array.isArray(users) ? users : [];
         const existingIds = usersInChats.map(u => u.id);
-        searchUsers = (users || [])
+
+        searchUsers = safeUsers
           .filter(u => !existingIds.includes(u.id))
           .map(u => ({ ...u, lastMessage: null }));
       }
 
       // 3. Формируем финальный массив
-      const friendsArr = (search && search.trim() !== "") 
+      const friendsArr = (search && search.trim() !== "")
         ? [...filteredChats, ...searchUsers]
         : usersInChats;
 
       return res.json({ success: true, friendsArr });
     } catch (err) {
       console.error("Failed supabase request:", err);
-      res.status(500).json({ success: false, error: "Server error" });
+      return res.status(500).json({ success: false, error: "Server error" });
     }
   });
 }
