@@ -49,7 +49,6 @@ export default function (app, supabase) {
                 timeZone: "Europe/Moscow"
             });
             console.log(today); // '2025-10-15'
-            // проверяем выполнение + комментарий
             const { data: completion, error: completionError } = await supabase
                 .from("habit_completions")
                 .select("id, comment")

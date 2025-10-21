@@ -26,6 +26,7 @@ import reactionsRoutes from "./reaction.js"
 import askauthRoutes from "./askauth.js"
 import addpostRoutes from "./addpost.js"
 import postsRoutes from "./posts.js"
+import uppostRoutes from "./uppost.js"
 
 import { createClient } from "@supabase/supabase-js";
 import initWebSocket from "./ws.js";
@@ -77,6 +78,7 @@ reactionsRoutes(app, supabase);
 askauthRoutes(app, supabase);
 addpostRoutes(app, supabase);
 postsRoutes(app, supabase);
+uppostRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);
