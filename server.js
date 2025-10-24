@@ -28,6 +28,8 @@ import addpostRoutes from "./addpost.js"
 import postsRoutes from "./posts.js"
 import uppostRoutes from "./uppost.js"
 import likeRoutes from "./like.js"
+import sendcommentRoutes from "./sendcomment.js"
+import commentsRoutes from "./comments.js"
 
 import { createClient } from "@supabase/supabase-js";
 import initWebSocket from "./ws.js";
@@ -81,6 +83,8 @@ addpostRoutes(app, supabase);
 postsRoutes(app, supabase);
 uppostRoutes(app, supabase);
 likeRoutes(app, supabase);
+sendcommentRoutes(app, supabase);
+commentsRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);
