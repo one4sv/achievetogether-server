@@ -9,7 +9,7 @@ export default function (app, supabase) {
       // Берём все даты выполнений
       const { data: completions, error: errorComp } = await supabase
         .from("habit_completions")
-        .select("completed_at, habit_id")
+        .select("completed_at, habit_id, created_at")
         .eq("user_id", user_id);
 
       if (errorComp) {
@@ -50,6 +50,7 @@ export default function (app, supabase) {
             habitName: habit ? habit.name : "Неизвестная привычка",
             date: item.completed_at,
             comment,
+            created_at: item.created_at,
             isDone: true, // <-- добавляем
           };
         }),
@@ -95,7 +96,7 @@ export default function (app, supabase) {
       // Берём все completions
       const { data: completions, error: errorComp } = await supabase
         .from("habit_completions")
-        .select("completed_at")
+        .select("completed_at, created_at")
         .eq("habit_id", habit_id);
 
       if (errorComp) {
@@ -120,6 +121,7 @@ export default function (app, supabase) {
           habitName: habit.name,
           date: item.completed_at,
           comment: comments.find(c => c.date === item.completed_at)?.comment ?? "",
+          created_at: item.created_at,
           isDone: true,
         })),
         ...(comments ?? []).filter(c => !(completions ?? []).some(comp => comp.completed_at === c.date))
