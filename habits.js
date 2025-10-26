@@ -1,7 +1,6 @@
 import { authenticateUser } from "./middleware/token.js";
 
 export default function (app, supabase) {
-    // Получить все привычки пользователя
     app.get("/habits", authenticateUser(supabase), async (req, res) => {
         const { id } = req.user;
 
@@ -31,6 +30,7 @@ export default function (app, supabase) {
         const { id } = req.params;
 
         try {
+            // Получаем привычку
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("*")
@@ -39,19 +39,17 @@ export default function (app, supabase) {
 
             if (habitError || !habit) {
                 console.log(habitError);
-                return res
-                    .status(404)
-                    .json({ success: false, error: "Привычка не найдена" });
+                return res.status(404).json({ success: false, error: "Привычка не найдена" });
             }
 
-            // текущая дата
             const today = new Date().toLocaleDateString("en-CA", {
-                timeZone: "Europe/Moscow"
+                timeZone: "Europe/Moscow",
             });
-            console.log(today); // '2025-10-15'
+
+            // Получаем выполнение для today
             const { data: completion, error: completionError } = await supabase
                 .from("habit_completions")
-                .select("id, comment")
+                .select("id")
                 .eq("habit_id", id)
                 .eq("user_id", currentUserId)
                 .eq("completed_at", today)
@@ -59,15 +57,27 @@ export default function (app, supabase) {
 
             if (completionError) {
                 console.error(completionError);
-                return res.status(500).json({
-                    success: false,
-                    error: "Ошибка проверки выполнения",
-                });
+                return res.status(500).json({ success: false, error: "Ошибка проверки выполнения" });
             }
 
             const isDone = !!completion;
             const isRead = habit.user_id !== currentUserId;
-            const comment = completion?.comment || "";
+
+            // Получаем комментарий для today
+            const { data: commentData, error: commentError } = await supabase
+                .from("completions_comments")
+                .select("comment")
+                .eq("habit_id", id)
+                .eq("user_id", currentUserId)
+                .eq("date", today)
+                .maybeSingle();
+
+            if (commentError) {
+                console.error(commentError);
+                return res.status(500).json({ success: false, error: "Ошибка получения комментария" });
+            }
+
+            const comment = commentData?.comment || "";
 
             res.json({
                 success: true,
@@ -80,5 +90,5 @@ export default function (app, supabase) {
             console.error("Ошибка запроса к Supabase:", err);
             res.status(500).json({ success: false, error: "Ошибка сервера" });
         }
-    });
+        });
 }

@@ -3,19 +3,22 @@ import { authenticateUser } from "./middleware/token.js";
 export default function (app, supabase) {
   app.post("/markdone", authenticateUser(supabase), async (req, res) => {
     const { id: user_id } = req.user;
-    const { habit_id } = req.body;
+    const { habit_id, date } = req.body;
 
     try {
       const today = new Date().toLocaleDateString("en-CA", {
         timeZone: "Europe/Moscow"
       });
 
+      // Если date есть — берём её, иначе today
+      const targetDate = date && date.trim() !== "" ? date : today;
+
       const { data: existing, error: selectError } = await supabase
         .from("habit_completions")
         .select("id")
         .eq("habit_id", habit_id)
         .eq("user_id", user_id)
-        .eq("completed_at", today);
+        .eq("completed_at", targetDate);
 
       if (selectError) {
         console.error("Ошибка проверки:", selectError);
@@ -28,7 +31,7 @@ export default function (app, supabase) {
           .delete()
           .eq("habit_id", habit_id)
           .eq("user_id", user_id)
-          .eq("completed_at", today);
+          .eq("completed_at", targetDate);
 
         if (deleteError) {
           console.error("Ошибка удаления:", deleteError);
@@ -43,7 +46,7 @@ export default function (app, supabase) {
             {
               habit_id,
               user_id,
-              completed_at: today,
+              completed_at: targetDate,
             },
           ]);
 
