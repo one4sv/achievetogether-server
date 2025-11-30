@@ -2,22 +2,45 @@ import { authenticateUser } from "./middleware/token.js";
 
 export default function (app, supabase) {
     app.get("/habits", authenticateUser(supabase), async (req, res) => {
-        const { id } = req.user;
+        const { id: userId } = req.user;
+        const today = new Date().toLocaleDateString("en-CA", {
+            timeZone: "Europe/Moscow",
+        });
 
         try {
-            const { data: habitsArr, error } = await supabase
+            const { data: habitsArr, error: habitsError } = await supabase
                 .from("habits")
                 .select("*")
-                .eq("user_id", id);
+                .eq("user_id", userId);
 
-            if (error) {
-                console.log(error);
+            if (habitsError) {
+                console.log(habitsError);
                 return res.status(404).json({ success: false, error: "Пользователь не найден" });
             }
 
+            const { data: completionsArr, error: completionsError } = await supabase
+                .from("habit_completions")
+                .select("habit_id")
+                .eq("user_id", userId)
+                .eq("completed_at", today);
+
+            if (completionsError) {
+                console.error(completionsError);
+                return res.status(500).json({ success: false, error: "Ошибка получения выполнений" });
+            }
+
+            // Множество habit_id, которые выполнены сегодня
+            const doneSet = new Set(completionsArr.map(c => c.habit_id));
+
+            // Добавляем done: true/false для каждой привычки
+            const habitsWithDone = habitsArr.map(habit => ({
+                ...habit,
+                done: doneSet.has(habit.id),
+            }));
+
             res.json({
                 success: true,
-                habitsArr,
+                habitsArr: habitsWithDone,
             });
         } catch (err) {
             console.error("Ошибка запроса к Supabase:", err);
