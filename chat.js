@@ -1,55 +1,45 @@
 import { authenticateUser } from "./middleware/token.js";
 import multer from "multer";
-import { broadcastNewMessage, broadcastMessageRead } from "./ws.js"; // Импорт для бродкаста через WS
+import { broadcastNewMessage, broadcastMessageRead } from "./ws.js";
 import crypto from "crypto";
 import path from "path";
 
 export default function (app, supabase) {
   const upload = multer({ storage: multer.memoryStorage() });
-
   // Проверка API
   app.get("/chat", (req, res) => {
     res.send("Chat api is working...");
   });
-
   // Получить чат и сообщения (обновлено для файлов в сообщениях)
-  app.get("/chat/:id", authenticateUser(supabase), async (req, res) => {
+  app.get("/chat/:nick", authenticateUser(supabase), async (req, res) => {
     const { id } = req.user; // текущий пользователь
-    const chatWithId = req.params.id; // собеседник
-
+    const chatWithNick = req.params.nick; // собеседник
     try {
       // Проверяем существование собеседника
       const { data: chatWith, error: userError } = await supabase
         .from("users")
         .select("id, username, nick, avatar_url, last_online")
-        .eq("id", chatWithId)
+        .eq("nick", chatWithNick)
         .single();
-
       if (userError || !chatWith) {
         return res
           .status(404)
           .json({ success: false, error: "Пользователь не найден" });
       }
-
       // Получаем чаты текущего пользователя
       const { data: myChats } = await supabase
         .from("chat_members")
         .select("chat_id")
         .eq("user_id", id);
-
       const myChatIds = myChats?.map(c => c.chat_id) || [];
-
       // Получаем чаты собеседника
       const { data: theirChats } = await supabase
         .from("chat_members")
         .select("chat_id")
-        .eq("user_id", chatWithId);
-
+        .eq("user_id", chatWith.id);
       const theirChatIds = theirChats?.map(c => c.chat_id) || [];
-
       // Находим общий чат
       const chatId = myChatIds.find(chatId => theirChatIds.includes(chatId));
-
       let messages = [];
       if (chatId) {
         const { data: msgs } = await supabase
@@ -74,22 +64,21 @@ export default function (app, supabase) {
       const messagesToUpdate = messages.filter(
         m => m.sender_id !== id && !m.read_by.includes(id)
       );
-
       if (messagesToUpdate.length > 0) {
         for (const m of messagesToUpdate) {
           await supabase
             .from("messages")
             .update({ read_by: [...m.read_by, id] })
             .eq("id", m.id);
-          
-          broadcastNewMessage(chatId, { ...m, read_by: [...m.read_by, id] });
+         
+          broadcastMessageRead(chatId, { messageId: m.id, userId: id });
         }
       }
       res.json({
         success: true,
         user: {
+          id:chatWith.id,
           username: chatWith.username,
-          nick: chatWith.nick,
           avatar_url: chatWith.avatar_url,
           last_online: chatWith.last_online
         },
@@ -100,37 +89,40 @@ export default function (app, supabase) {
       res.status(500).json({ success: false, error: "Ошибка сервера" });
     }
   });
-
   // Отправка сообщения (с поддержкой файлов)
   app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
     const { id } = req.user;
-    const { receiver_id, text } = req.body;
+    const { receiver_nick, text } = req.body;  // Изменено на receiver_nick
     const files = req.files || [];
-
     if ((!text || !text.trim()) && files.length === 0) {
       return res.status(400).json({ success: false, error: "Сообщение пустое" });
     }
-
     try {
+      // Находим receiver_id по nick
+      const { data: receiverUser, error: receiverError } = await supabase
+        .from("users")
+        .select("id")
+        .eq("nick", receiver_nick)
+        .single();
+      if (receiverError || !receiverUser) {
+        return res.status(404).json({ success: false, error: "Пользователь не найден" });
+      }
+      const receiver_id = receiverUser.id;
+
       // Чаты текущего пользователя
       const { data: myChats } = await supabase
         .from("chat_members")
         .select("chat_id")
         .eq("user_id", id);
-
       const myChatIds = myChats?.map(c => c.chat_id) || [];
-
       // Чаты получателя
       const { data: theirChats } = await supabase
         .from("chat_members")
         .select("chat_id")
         .eq("user_id", receiver_id);
-
       const theirChatIds = theirChats?.map(c => c.chat_id) || [];
-
       // Находим общий чат
       let chatId = myChatIds.find(chatId => theirChatIds.includes(chatId));
-
       // Если чата нет — создаём
       if (!chatId) {
         const { data: newChat } = await supabase
@@ -138,22 +130,18 @@ export default function (app, supabase) {
           .insert({})
           .select("id")
           .single();
-
         chatId = newChat.id;
-
         await supabase.from("chat_members").insert([
           { chat_id: chatId, user_id: id },
           { chat_id: chatId, user_id: receiver_id },
         ]);
       }
-
       // Добавляем сообщение
       const { data: message } = await supabase
         .from("messages")
         .insert([{ chat_id: chatId, sender_id: id, content: text || "" }])
         .select()
         .single();
-
       let filesData = [];
       if (files.length > 0) {
         for (const file of files) {
@@ -163,15 +151,12 @@ export default function (app, supabase) {
           const { error: uploadError } = await supabase.storage
             .from("media")
             .upload(filePath, file.buffer, { contentType: file.mimetype });
-
           if (uploadError) {
             throw uploadError;
           }
-
           const { data: { publicUrl } } = supabase.storage
             .from("media")
             .getPublicUrl(filePath);
-
           filesData.push({
             message_id: message.id,
             file_url: publicUrl,
@@ -180,20 +165,16 @@ export default function (app, supabase) {
             file_size: file.size
           });
         }
-
         const { error: insertError } = await supabase.from("message_files").insert(filesData);
         if (insertError) {
           console.error("Ошибка вставки файлов:", insertError);
           throw insertError;
         }
       }
-
       // Формируем сообщение с файлами
       const messageWithFiles = { ...message, files: filesData.map(f => ({ url: f.file_url, name: f.file_name, type: f.file_type })) };
-
       // Бродкаст через WS
       broadcastNewMessage(chatId, messageWithFiles);
-
       res.json({ success: true, message: messageWithFiles });
     } catch (err) {
       console.error("Ошибка при отправке сообщения:", err);
@@ -204,22 +185,18 @@ export default function (app, supabase) {
   app.post("/chat/read", authenticateUser(supabase), async (req, res) => {
     const { id } = req.user; // текущий пользователь
     const { messageId } = req.body;
-
     if (!messageId) {
       return res.status(400).json({ success: false, error: "messageId обязателен" });
     }
-
     try {
       const { data: msg, error: msgError } = await supabase
         .from("messages")
         .select("id, read_by, chat_id")
         .eq("id", messageId)
         .single();
-
       if (msgError || !msg) {
         return res.status(404).json({ success: false, error: "Сообщение не найдено" });
       }
-
       if (!msg.read_by.includes(id)) {
         await supabase
           .from("messages")
@@ -227,11 +204,9 @@ export default function (app, supabase) {
             read_by: [...msg.read_by, id]
           })
           .eq("id", messageId);
-
         // Можно оповестить участников через WS
         broadcastMessageRead(msg.chat_id, messageId, id);
       }
-
       res.json({ success: true });
     } catch (err) {
       console.error("Ошибка при обновлении read_by:", err);

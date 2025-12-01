@@ -1,31 +1,35 @@
 import { authenticateUser } from "./middleware/token.js";
 
 export default function (app, supabase) {
-  app.get("/acc/:id", authenticateUser(supabase), async (req, res) => {
+  app.get("/acc/:nick", authenticateUser(supabase), async (req, res) => {
     try {
-      const { id } = req.params;
+      const { nick } = req.params;
       const { id: user_id } = req.user;
 
       // --- 1. Получаем данные пользователя
       const { data: acc, error: accError } = await supabase
         .from("users")
         .select("*")
-        .eq("id", id)
-        .single();
+        .eq("nick", nick)
+        .maybeSingle();
+      
+      if (!acc) {
+        return res.status(404).json({ success: false, error: "User not found" });
+      }
       if (accError) throw accError;
 
       // --- 2. Получаем привычки
       const { data: habits, error: habitsError } = await supabase
         .from("habits")
         .select("*")
-        .eq("user_id", id);
+        .eq("user_id", acc.id);
       if (habitsError) throw habitsError;
 
       // --- 3. Приватные настройки
       const { data: settings, error: privateError } = await supabase
         .from("settings")
         .select("private")
-        .eq("user_id", id)
+        .eq("user_id", acc.id)
         .single();
       if (privateError) throw privateError;
 
@@ -33,7 +37,7 @@ export default function (app, supabase) {
       const { data: posts, error: postsError } = await supabase
         .from("posts")
         .select("*")
-        .eq("user_id", id)
+        .eq("user_id", acc.id)
         .order("created_at", { ascending: false });
       if (postsError) throw postsError;
 
@@ -46,7 +50,7 @@ export default function (app, supabase) {
       const { data: accChats } = await supabase
         .from("chat_members")
         .select("chat_id")
-        .eq("user_id", id);
+        .eq("user_id", acc.id);
 
       const commonChatIds = userChats
         ?.map(c => c.chat_id)

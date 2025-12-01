@@ -1,37 +1,21 @@
 import { WebSocketServer, WebSocket } from "ws";
 
 let clientsMap = new Map(); // userId -> Set(ws)
-let supabaseGlobal; // to share supabase
-let broadcastUserStatus; // forward declaration
+let supabaseGlobal;
+let broadcastUserStatus;
 
 export async function broadcastNewMessage(chat_id, message) {
   try {
-    // Получаем id отправителя
     const senderId = message.sender_id;
-
-    // Получаем ник и username из таблицы users
-    const { data: senderData, error: senderError } = await supabaseGlobal
+    const { data: senderData } = await supabaseGlobal
       .from("users")
       .select("nick, username")
       .eq("id", senderId)
       .single();
-
-    if (senderError) {
-      console.error("Ошибка получения данных отправителя:", senderError);
-    }
-
-    // Получаем участников чата
-    const { data: members, error: membersError } = await supabaseGlobal
+    const { data: members } = await supabaseGlobal
       .from("chat_members")
       .select("user_id")
       .eq("chat_id", chat_id);
-
-    if (membersError) {
-      console.error("Ошибка получения участников:", membersError);
-      return;
-    }
-
-    // Рассылаем сообщение всем участникам
     members?.forEach(member => {
       const targetId = member.user_id;
       const sockets = clientsMap.get(targetId);
@@ -73,17 +57,20 @@ export function broadcastMessageRead(chat_id, messageId, userId) {
       });
     });
 }
+
 export function broadcastReaction(payload) {
   const { messageId, user_id, reaction, removed } = payload;
-  for (const [userId, sockets] of clientsMap.entries()) {
+  for (const sockets of clientsMap.values()) {
     sockets.forEach(ws => {
-      ws.send(JSON.stringify({
-        type: "MESSAGE_REACTION",
-        messageId,
-        user_id,
-        reaction,
-        removed // <-- добавили
-      }));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "MESSAGE_REACTION",
+          messageId,
+          user_id,
+          reaction,
+          removed
+        }));
+      }
     });
   }
 }
@@ -91,7 +78,7 @@ export function broadcastReaction(payload) {
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
   const wss = new WebSocketServer({ server, path: "/ws" });
-  clientsMap = new Map(); // userId -> Set(ws)
+  clientsMap = new Map();
   wss.on("connection", async (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const userId = url.searchParams.get("userId");
@@ -107,18 +94,25 @@ export default function initWebSocket(supabase, server) {
       .from("users")
       .update({ last_online: new Date().toISOString() })
       .eq("id", userId);
+    // посылаем статус всем
     broadcastUserStatus(userId, true);
-    // Отправляем новому подключенному клиенту статус всех онлайн пользователей
-    for (const [otherUserId, sockets] of clientsMap.entries()) {
+    // Отправляем новому подключенному клиенту статус всех онлайн пользователей (с nick)
+    for (const [otherUserId] of clientsMap.entries()) {
       if (otherUserId === userId) continue;
+      // найдем nick для otherUserId
+      const { data: userRow } = await supabase
+        .from("users")
+        .select("nick")
+        .eq("id", otherUserId)
+        .single();
       const payload = JSON.stringify({
         type: "USER_STATUS",
         userId: otherUserId,
+        nick: userRow?.nick || null,
         isOnline: true
       });
       ws.send(payload);
     }
-    // Таймер обновления last_online
     const aliveTimer = setInterval(async () => {
       try {
         await supabase
@@ -132,13 +126,36 @@ export default function initWebSocket(supabase, server) {
     ws.on("message", async (msg) => {
       const data = JSON.parse(msg.toString());
       if (data.type === "TYPING" || data.type === "STOP_TYPING") {
-        const targetSockets = clientsMap.get(data.to);
-        targetSockets?.forEach(s => {
-            if (s.readyState === WebSocket.OPEN) {
-                s.send(JSON.stringify({ ...data, from: userId }));
+        // data.to может быть id или nick — сначала пробуем как id
+        let targetSockets = clientsMap.get(data.to);
+        if (!targetSockets) {
+          // попробуем найти пользователя по nick
+          try {
+            const { data: userByNick } = await supabaseGlobal
+              .from("users")
+              .select("id")
+              .eq("nick", data.to)
+              .single();
+            if (userByNick) {
+              targetSockets = clientsMap.get(userByNick.id);
             }
+          } catch (err) {
+            console.error("Ошибка поиска пользователя по nick для TYPING:", err);
+          }
+        }
+        // Получаем nick отправителя
+        const { data: fromUser } = await supabaseGlobal
+          .from("users")
+          .select("nick")
+          .eq("id", userId)
+          .single();
+        targetSockets?.forEach(s => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({ ...data, from: fromUser?.nick || null }));  // Изменено на from: nick
+          }
         });
       }
+      // сюда можно добавить обработку других типов (реакции и т.д.)
     });
     ws.on("close", async () => {
       console.log(`🔴 WS disconnected: user ${userId}`);
@@ -157,16 +174,27 @@ export default function initWebSocket(supabase, server) {
   });
   broadcastUserStatus = async function (userId, isOnline) {
     let last_online = null;
+    let nick = null;
     if (!isOnline) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseGlobal
         .from("users")
-        .select("last_online")
+        .select("last_online, nick")
         .eq("id", userId)
         .single();
-      if (!error && data) last_online = data.last_online;
+      if (!error && data) {
+        last_online = data.last_online;
+        nick = data.nick;
+      }
+    } else {
+      // Если онлайн — можно получить nick всё равно (для единообразия)
+      const { data } = await supabaseGlobal
+        .from("users")
+        .select("nick")
+        .eq("id", userId)
+        .single();
+      nick = data?.nick || null;
     }
-    const payload = JSON.stringify({ type: "USER_STATUS", userId, isOnline, last_online });
-    // Рассылаем всем активным сокетам
+    const payload = JSON.stringify({ type: "USER_STATUS", userId, nick, isOnline, last_online });
     for (const sockets of clientsMap.values()) {
       sockets.forEach(ws => {
         if (ws.readyState === WebSocket.OPEN) ws.send(payload);
