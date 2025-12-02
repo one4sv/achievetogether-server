@@ -14,6 +14,7 @@ export default function (app, supabase) {
   app.get("/chat/:nick", authenticateUser(supabase), async (req, res) => {
     const { id } = req.user; // текущий пользователь
     const chatWithNick = req.params.nick; // собеседник
+
     try {
       // Проверяем существование собеседника
       const { data: chatWith, error: userError } = await supabase
@@ -21,11 +22,13 @@ export default function (app, supabase) {
         .select("id, username, nick, avatar_url, last_online")
         .eq("nick", chatWithNick)
         .single();
+
       if (userError || !chatWith) {
         return res
           .status(404)
           .json({ success: false, error: "Пользователь не найден" });
       }
+
       // Получаем чаты текущего пользователя
       const { data: myChats } = await supabase
         .from("chat_members")
@@ -41,7 +44,22 @@ export default function (app, supabase) {
       // Находим общий чат
       const chatId = myChatIds.find(chatId => theirChatIds.includes(chatId));
       let messages = [];
+      let chatMember = { note: null, pinned: false, is_blocked: false };
+
       if (chatId) {
+        const { data: cm, error: cmError } = await supabase
+          .from("chat_members")
+          .select("note, pinned, is_blocked")
+          .eq("chat_id", chatId)
+          .eq("user_id", id)
+          .single();
+
+        if (cmError) {
+          console.error("Ошибка при получении chat_members:", cmError);
+        }
+          
+        chatMember = cm || chatMember;
+        
         const { data: msgs } = await supabase
           .from("messages")
           .select("id, sender_id, content, created_at, message_files(file_url, file_name, file_type), read_by, reactions")
@@ -80,7 +98,10 @@ export default function (app, supabase) {
           id:chatWith.id,
           username: chatWith.username,
           avatar_url: chatWith.avatar_url,
-          last_online: chatWith.last_online
+          last_online: chatWith.last_online,
+          note: chatMember.note,
+          is_blocked: chatMember.is_blocked,
+          pinned: chatMember.pinned
         },
         messages,
       });

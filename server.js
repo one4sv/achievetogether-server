@@ -30,6 +30,9 @@ import uppostRoutes from "./uppost.js"
 import likeRoutes from "./like.js"
 import sendcommentRoutes from "./sendcomment.js"
 import commentsRoutes from "./comments.js"
+import offsoundRoutes from "./offsound.js"
+import toggleblockedRoutes from "./toggleblocked.js"
+import togglepinnedRoutes from "./togglepinned.js"
 
 import { createClient } from "@supabase/supabase-js";
 import initWebSocket from "./ws.js";
@@ -85,6 +88,9 @@ uppostRoutes(app, supabase);
 likeRoutes(app, supabase);
 sendcommentRoutes(app, supabase);
 commentsRoutes(app, supabase);
+offsoundRoutes(app, supabase);
+toggleblockedRoutes(app, supabase);
+togglepinnedRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);

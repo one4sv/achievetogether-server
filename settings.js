@@ -28,8 +28,8 @@ export default function(app, supabase) {
                 decor:data.decor,
                 bg_url:data.bg_url,
                 twoAuth:data.two_auth,
-                note:data.note,
-                messNote:data.mess_note,
+                all_note:data.all_note,
+                new_mess_note:data.new_mess_note,
             });
         } catch (err) {
             console.error("Ошибка запроса к Supabase:", err);
