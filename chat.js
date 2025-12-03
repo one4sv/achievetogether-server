@@ -59,6 +59,18 @@ export default function (app, supabase) {
         }
           
         chatMember = cm || chatMember;
+
+        const {data: am_i_blocked_data, error: am_i_blocked_error} = await supabase
+          .from("chat_members")
+          .select("is_blocked")
+          .eq("chat_id", chatId)
+          .eq("user_id", chatWith.id)
+
+        if (am_i_blocked_error) {
+          console.error("Ошибка при получении am_i_blocked:", am_i_blocked_error);
+        }
+
+        chatWith.am_i_blocked = am_i_blocked_data && am_i_blocked_data.length > 0 ? am_i_blocked_data[0].is_blocked : false;
         
         const { data: msgs } = await supabase
           .from("messages")
@@ -101,7 +113,8 @@ export default function (app, supabase) {
           last_online: chatWith.last_online,
           note: chatMember.note,
           is_blocked: chatMember.is_blocked,
-          pinned: chatMember.pinned
+          pinned: chatMember.pinned,
+          am_i_blocked:chatWith.am_i_blocked
         },
         messages,
       });

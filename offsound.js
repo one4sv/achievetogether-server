@@ -6,10 +6,8 @@ export default function(app, supabase) {
         const { id:id2 } = req.body;
 
         try {
-            const { data:chat, error:chat_error } = await supabase
-                .from("chat_members")
-                .select("chat_id")
-                .in("user_id", [id1, id2])
+            const { data: chat, error: chat_error } = await supabase
+                .rpc("get_shared_chat", { uid1: id1, uid2: id2 });
 
             if (chat_error || !chat || chat.length === 0) {
                 return res.status(404).json({ success: false, error: "Чат не найден" });
