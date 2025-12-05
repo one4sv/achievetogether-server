@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { sendMail } from "./sendmail.js"; // твой модуль с API
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
+
 dotenv.config();
 
 const SECRET = process.env.JWT_SECRET;

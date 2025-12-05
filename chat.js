@@ -3,6 +3,7 @@ import multer from "multer";
 import { broadcastNewMessage, broadcastMessageRead } from "./ws.js";
 import crypto from "crypto";
 import path from "path";
+import { BotInit } from "./bot.js";
 
 export default function (app, supabase) {
   const upload = multer({ storage: multer.memoryStorage() });
@@ -101,7 +102,7 @@ export default function (app, supabase) {
             .update({ read_by: [...m.read_by, id] })
             .eq("id", m.id);
          
-          broadcastMessageRead(chatId, { messageId: m.id, userId: id });
+          broadcastMessageRead(chatId, m.id, id);
         }
       }
       res.json({
@@ -176,6 +177,15 @@ export default function (app, supabase) {
         .insert([{ chat_id: chatId, sender_id: id, content: text || "" }])
         .select()
         .single();
+
+      if (receiver_nick === "ATBot") {
+        const bot = BotInit(supabase);
+        bot.handleMessage({
+          chatId,
+          userMessage: text
+        });
+      }
+
       let filesData = [];
       if (files.length > 0) {
         for (const file of files) {

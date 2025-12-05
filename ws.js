@@ -12,29 +12,54 @@ export async function broadcastNewMessage(chat_id, message) {
       .select("nick, username")
       .eq("id", senderId)
       .single();
+
+    // Получаем участников чата с их настройками уведомлений (note из chat_members)
     const { data: members } = await supabaseGlobal
       .from("chat_members")
-      .select("user_id")
+      .select("user_id, note")
       .eq("chat_id", chat_id);
-    members?.forEach(member => {
-      const targetId = member.user_id;
-      const sockets = clientsMap.get(targetId);
-      sockets?.forEach(s => {
-        if (s.readyState === WebSocket.OPEN) {
-          s.send(JSON.stringify({
-            type: "NEW_MESSAGE",
-            chatId: chat_id,
-            message,
-            nick: senderData?.nick || null,
-            username: senderData?.username || null
-          }));
-        }
-      });
-    });
+
+    // Получаем глобальные настройки для всех участников
+    const userIds = members?.map(m => m.user_id) || [];
+    const { data: settingsList } = await supabaseGlobal
+      .from("settings")
+      .select("user_id, all_note, new_mess_note")
+      .in("user_id", userIds);
+
+    // Создаем мапу userId => settings
+    const settingsMap = new Map(settingsList.map(s => [s.user_id, s]));
+
+    for (const member of members || []) {
+      const userId = member.user_id;
+      const userSettings = settingsMap.get(userId);
+
+      // Проверяем настройки (если настроек нет, считаем true по умолчанию)
+      const allNote = userSettings?.all_note ?? true;
+      const newMessNote = userSettings?.new_mess_note ?? true;
+      const chatNote = member.note;
+      console.log("UserId:", userId, "allNote:", allNote, "newMessNote:", newMessNote, "chatNote:", chatNote);
+      
+      if (allNote && newMessNote && chatNote) {
+        const sockets = clientsMap.get(userId);
+        sockets?.forEach(s => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({
+              type: "NEW_MESSAGE",
+              chatId: chat_id,
+              message,
+              nick: senderData?.nick || null,
+              username: senderData?.username || null,
+              is_note: chatNote
+            }));
+          }
+        });
+      }
+    }
   } catch (err) {
     console.error("Ошибка в broadcastNewMessage:", err);
   }
 }
+
 
 export function broadcastMessageRead(chat_id, messageId, userId) {
   supabaseGlobal
