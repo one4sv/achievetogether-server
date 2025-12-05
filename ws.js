@@ -99,6 +99,23 @@ export function broadcastReaction(payload) {
     });
   }
 }
+export function broadcastMessageDeleted(chat_id, messageId, userId = null) {
+    console.log("Broadcasting MESSAGE_DELETED", { chat_id, messageId, userId });
+    for (const sockets of clientsMap.values()) {
+        sockets.forEach(ws => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "MESSAGE_DELETED",
+                    chatId: chat_id,
+                    messageId,
+                    userId
+                }));
+                console.log("Sent to a client");
+            }
+        });
+    }
+}
+
 
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
@@ -226,5 +243,6 @@ export default function initWebSocket(supabase, server) {
       });
     }
   }
+  
   console.log("✅ WebSocket initialized on /ws");
 }

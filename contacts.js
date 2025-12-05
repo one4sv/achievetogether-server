@@ -57,6 +57,7 @@ export default function (app, supabase) {
           .from("messages")
           .select("id, chat_id, sender_id, content, created_at, read_by")
           .in("chat_id", chatIds)
+          .not('hidden', 'cs', `{"${id}"}`) 
           .order("created_at", { ascending: false });
 
         const safeMessages = Array.isArray(messages) ? messages : [];
