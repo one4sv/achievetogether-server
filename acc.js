@@ -71,7 +71,7 @@ export default function (app, supabase) {
         if (messageIds.length > 0) {
           const { data: files, error: filesError } = await supabase
             .from("message_files")
-            .select("id, file_url, file_type, file_name")
+            .select("id, file_url, file_type, file_name, message_id")
             .in("message_id", messageIds)
             .order("created_at", { ascending: false });
 
@@ -80,7 +80,8 @@ export default function (app, supabase) {
           media = files?.map(f => ({
             url: f.file_url,
             name: f.file_name,
-            type: f.file_type
+            type: f.file_type,
+            message_id: f.message_id
           })) || [];
         }
       }
