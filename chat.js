@@ -82,7 +82,8 @@ export default function (app, supabase) {
             created_at,
             read_by,
             reactions,
-            message_files (file_url, file_name, file_type)
+            message_files (file_url, file_name, file_type),
+            answer_id
           `)
           .eq("chat_id", chatId)
           .not('hidden', 'cs', `{"${id}"}`)  // для uuid[] оператор cs ожидает PostgreSQL массив синтаксис
@@ -136,7 +137,7 @@ export default function (app, supabase) {
   // Отправка сообщения (с поддержкой файлов)
   app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
     const { id } = req.user;
-    const { receiver_nick, text } = req.body;  // Изменено на receiver_nick
+    const { receiver_nick, text, answer_id } = req.body;  // Изменено на receiver_nick
     const files = req.files || [];
     if ((!text || !text.trim()) && files.length === 0) {
       return res.status(400).json({ success: false, error: "Сообщение пустое" });
@@ -183,7 +184,7 @@ export default function (app, supabase) {
       // Добавляем сообщение
       const { data: message } = await supabase
         .from("messages")
-        .insert([{ chat_id: chatId, sender_id: id, content: text || "" }])
+        .insert([{ chat_id: chatId, sender_id: id, content: text || "", answer_id: answer_id || null }])
         .select()
         .single();
 
