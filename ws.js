@@ -60,6 +60,27 @@ export async function broadcastNewMessage(chat_id, message) {
   }
 }
 
+export function broadcastMessageEdited(chat_id, message) {
+  supabaseGlobal
+    .from("chat_members")
+    .select("user_id")
+    .eq("chat_id", chat_id)
+    .then(({ data: members }) => {
+      members?.forEach(member => {
+        const sockets = clientsMap.get(member.user_id);
+        sockets?.forEach(s => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({
+              type: "MESSAGE_EDITED",
+              chatId: chat_id,
+              message
+            }));
+          }
+        });
+      });
+    })
+    .catch(err => console.error("Ошибка в broadcastMessageEdited:", err));
+}
 
 export function broadcastMessageRead(chat_id, messageId, userId) {
   supabaseGlobal
@@ -240,9 +261,9 @@ export default function initWebSocket(supabase, server) {
     for (const sockets of clientsMap.values()) {
       sockets.forEach(ws => {
         if (ws.readyState === WebSocket.OPEN) ws.send(payload);
-      });
+      }
+    );
     }
+    console.log("✅ WebSocket initialized on /ws");
   }
-  
-  console.log("✅ WebSocket initialized on /ws");
 }
