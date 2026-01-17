@@ -91,33 +91,82 @@ export default function (app, supabase) {
           .not('hidden', 'cs', `{"${id}"}`) // для uuid[] оператор cs ожидает PostgreSQL массив синтаксис
           .order("created_at", { ascending: true });
 
-          const userIds = [id, chatWith.id];
-          const { data: users } = await supabase
-            .from("users")
-            .select("id, username, nick")
-            .in("id", userIds);
+        // ДОБАВЛЕНО: Fetch перенаправленных сообщений
+        const redirectedIds = msgs
+          .map(msg => msg.redirected_id)
+          .filter(rId => rId !== null);
+        const uniqueRedirectedIds = [...new Set(redirectedIds)];
+        let redirectedMap = new Map();
+        let redirectedMsgs = []; // ДОБАВЛЕНО: сохраняем для сбора sender_ids
+        if (uniqueRedirectedIds.length > 0) {
+          const { data, error: redirectedError } = await supabase
+            .from("messages")
+            .select(`
+              id,
+              sender_id,
+              content,
+              created_at,
+              message_files (file_url, file_name, file_type),
+              answer_id,
+              edited
+            `)
+            .in("id", uniqueRedirectedIds);
 
-          // Создаём словарь id => имя
-          const userMap = {};
-          const nickMap = {};
-          (users || []).forEach(u => {
-            userMap[u.id] = u.username || u.nick;
-            nickMap[u.id] = u.nick;
-          });
-        // Преобразование для клиента
-        messages = (msgs || []).map(msg => ({
-          ...msg,
-          sender_name:userMap[msg.sender_id],
-          sender_nick:nickMap[msg.sender_id],
-          read_by: msg.read_by || [], // ← защита от undefined
-          files: msg.message_files
-            ? msg.message_files.map(f => ({
-                url: f.file_url,
-                name: f.file_name,
-                type: f.file_type
-              }))
-            : []
-        }));
+          if (redirectedError) {
+            console.error("Ошибка при получении перенаправленных сообщений:", redirectedError);
+          } else {
+            redirectedMsgs = data; // ДОБАВЛЕНО
+            data.forEach(m => redirectedMap.set(m.id, m));
+          }
+        }
+
+        // ИЗМЕНЕНО: Собираем все уникальные sender_id из msgs и redirectedMsgs
+        const allSenderIds = new Set();
+        msgs.forEach(msg => allSenderIds.add(msg.sender_id));
+        redirectedMsgs.forEach(m => allSenderIds.add(m.sender_id));
+        allSenderIds.add(id); // Добавляем текущего пользователя на всякий случай
+        allSenderIds.add(chatWith.id); // Добавляем собеседника
+
+        // ИЗМЕНЕНО: Fetch пользователей по всем sender_ids
+        const { data: users } = await supabase
+          .from("users")
+          .select("id, username, nick")
+          .in("id", Array.from(allSenderIds));
+
+        // Создаём словарь id => имя
+        const userMap = {};
+        const nickMap = {};
+        (users || []).forEach(u => {
+          userMap[u.id] = u.username || u.nick;
+          nickMap[u.id] = u.nick;
+        });
+
+        // ИЗМЕНЕНО: Преобразование для клиента с добавлением перенаправленных данных (мапы теперь полные)
+        messages = (msgs || []).map(msg => {
+          const redirected = msg.redirected_id ? redirectedMap.get(msg.redirected_id) : null;
+          return {
+            ...msg,
+            sender_name: userMap[msg.sender_id],
+            sender_nick: nickMap[msg.sender_id],
+            read_by: msg.read_by || [],
+            redirected_name: redirected && msg.show_names ? userMap[redirected.sender_id] : null,
+            redirected_nick: redirected && msg.show_names ? nickMap[redirected.sender_id] : null,
+            redirected_content: redirected ? redirected.content : null,
+            redirected_files: redirected ? (redirected.message_files || []).map(f => ({
+              url: f.file_url,
+              name: f.file_name,
+              type: f.file_type
+            })) : null,
+            redirected_answer: redirected ? redirected.answer_id : null,
+            files: msg.message_files
+              ? msg.message_files.map(f => ({
+                  url: f.file_url,
+                  name: f.file_name,
+                  type: f.file_type
+                }))
+              : []
+          };
+        });
       }
       // В endpoint /chat/:id после получения сообщений
       const messagesToUpdate = messages.filter(
@@ -157,12 +206,13 @@ export default function (app, supabase) {
     const { id } = req.user;
     const { receiver_nick, text, answer_id } = req.body;
     let redirect = []
+    let show_names = true
     if (req.body.redirect) {
       redirect = JSON.parse(req.body.redirect)
       show_names = req.body.showNames
     }
     const files = req.files || [];
-    if ((!text || !text.trim()) && files.length === 0) {
+    if ((!text || !text.trim()) && files.length === 0 && redirect.length === 0) {
       return res.status(400).json({ success: false, error: "Сообщение пустое" });
     }
     try {
@@ -205,19 +255,35 @@ export default function (app, supabase) {
         ]);
       }
       // Добавляем сообщение
-      const { data: message } = await supabase
+      const createdMessages = []
+      const { data: mainMessage } = await supabase
         .from("messages")
-        .insert([{ chat_id: chatId, sender_id: id, content: text || "", answer_id: answer_id || null, redirected_id: redirect ? redirect[0] : null, show_names: redirect ? show_names : true }])
+        .insert([{ 
+          chat_id: chatId, 
+          sender_id: id, 
+          content: text || "", 
+          answer_id: answer_id || null, 
+          redirected_id: redirect && redirect.length > 0 ? redirect[0] : null, 
+          show_names: redirect ? show_names : true 
+        }])
         .select()
         .single();
-
+      createdMessages.push(mainMessage);
       if (redirect && redirect.length > 1) {
         for (let i = 1; i < redirect.length; i++) {
-          const { data: redirect_mess } = await supabase
+          const { data: redirectMsg } = await supabase
             .from("messages")
-            .insert([{ chat_id: chatId, sender_id: id, content: "", redirected_id: redirect[i], show_names: redirect ? show_names : true }])
+            .insert([{ 
+                chat_id: chatId, 
+                sender_id: id, 
+                content: "", // В дополнительных редиректах обычно нет текста пользователя
+                redirected_id: redirect[i], 
+                show_names: show_names 
+            }])
             .select()
             .single();
+          
+          createdMessages.push(redirectMsg);
         }
       }
       if (receiver_nick === "ATBot") {
@@ -257,11 +323,73 @@ export default function (app, supabase) {
           throw insertError;
         }
       }
-      // Формируем сообщение с файлами
-      const messageWithFiles = { ...message, files: filesData.map(f => ({ url: f.file_url, name: f.file_name, type: f.file_type })) };
-      // Бродкаст через WS
-      broadcastNewMessage(chatId, messageWithFiles);
-      res.json({ success: true, message: messageWithFiles });
+      const { data: senderInfo } = await supabase
+        .from("users")
+        .select("username, nick")
+        .eq("id", id)
+        .single();
+
+      // Б. Если есть redirected_id, получаем инфо об оригинальном сообщении
+      const finalResponseMessages = [];
+      
+for (const msg of createdMessages) {
+        // А. Определяем файлы (только для первого сообщения)
+        // Если это msg.id совпадает с mainMessage.id, берем загруженные файлы, иначе пусто
+        const currentMsgFiles = (msg.id === mainMessage.id) 
+           ? filesData.map(f => ({ url: f.file_url, name: f.file_name, type: f.file_type }))
+           : [];
+
+        // Б. Собираем инфо о редиректе
+        let redirectedFullInfo = {};
+        if (msg.redirected_id) {
+            const { data: originalMsg } = await supabase
+            .from("messages")
+            .select(`content, sender_id, answer_id, message_files (file_url, file_name, file_type)`)
+            .eq("id", msg.redirected_id)
+            .single();
+
+            if (originalMsg) {
+                let originalUser = null;
+                if (msg.show_names) {
+                    const { data: ou } = await supabase
+                    .from("users")
+                    .select("username, nick")
+                    .eq("id", originalMsg.sender_id)
+                    .single();
+                    originalUser = ou;
+                }
+                redirectedFullInfo = {
+                    redirected_name: originalUser ? (originalUser.username || originalUser.nick) : null,
+                    redirected_nick: originalUser ? originalUser.nick : null,
+                    redirected_content: originalMsg.content,
+                    redirected_answer: originalMsg.answer_id,
+                    redirected_files: originalMsg.message_files ? originalMsg.message_files.map(f => ({
+                        url: f.file_url, name: f.file_name, type: f.file_type
+                    })) : []
+                };
+            }
+        }
+
+        // В. Формируем полный объект
+        const completeMessage = {
+            ...msg,
+            sender_name: senderInfo ? (senderInfo.username || senderInfo.nick) : null,
+            sender_nick: senderInfo ? senderInfo.nick : null,
+            read_by: msg.read_by || [],
+            reactions: [],
+            files: currentMsgFiles,
+            ...redirectedFullInfo
+        };
+
+        // Г. ОТПРАВЛЯЕМ В СОКЕТ
+        broadcastNewMessage(chatId, completeMessage);
+        
+        // Д. Добавляем в массив для ответа API
+        finalResponseMessages.push(completeMessage);
+      }
+
+      // Возвращаем массив сообщений (клиент должен уметь принимать массив или обрабатывать WS)
+      res.json({ success: true, messages: finalResponseMessages });
     } catch (err) {
       console.error("Ошибка при отправке сообщения:", err);
       res.status(500).json({ success: false, error: "Ошибка сервера" });
