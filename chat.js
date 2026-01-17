@@ -83,14 +83,32 @@ export default function (app, supabase) {
             reactions,
             message_files (file_url, file_name, file_type),
             answer_id,
-            edited
+            edited,
+            redirected_id,
+            show_names
           `)
           .eq("chat_id", chatId)
           .not('hidden', 'cs', `{"${id}"}`) // для uuid[] оператор cs ожидает PostgreSQL массив синтаксис
           .order("created_at", { ascending: true });
+
+          const userIds = [id, chatWith.id];
+          const { data: users } = await supabase
+            .from("users")
+            .select("id, username, nick")
+            .in("id", userIds);
+
+          // Создаём словарь id => имя
+          const userMap = {};
+          const nickMap = {};
+          (users || []).forEach(u => {
+            userMap[u.id] = u.username || u.nick;
+            nickMap[u.id] = u.nick;
+          });
         // Преобразование для клиента
         messages = (msgs || []).map(msg => ({
           ...msg,
+          sender_name:userMap[msg.sender_id],
+          sender_nick:nickMap[msg.sender_id],
           read_by: msg.read_by || [], // ← защита от undefined
           files: msg.message_files
             ? msg.message_files.map(f => ({
@@ -137,7 +155,12 @@ export default function (app, supabase) {
   // Отправка сообщения (с поддержкой файлов)
   app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
     const { id } = req.user;
-    const { receiver_nick, text, answer_id } = req.body; // Изменено на receiver_nick
+    const { receiver_nick, text, answer_id } = req.body;
+    let redirect = []
+    if (req.body.redirect) {
+      redirect = JSON.parse(req.body.redirect)
+      show_names = req.body.showNames
+    }
     const files = req.files || [];
     if ((!text || !text.trim()) && files.length === 0) {
       return res.status(400).json({ success: false, error: "Сообщение пустое" });
@@ -184,10 +207,19 @@ export default function (app, supabase) {
       // Добавляем сообщение
       const { data: message } = await supabase
         .from("messages")
-        .insert([{ chat_id: chatId, sender_id: id, content: text || "", answer_id: answer_id || null }])
+        .insert([{ chat_id: chatId, sender_id: id, content: text || "", answer_id: answer_id || null, redirected_id: redirect ? redirect[0] : null, show_names: redirect ? show_names : true }])
         .select()
         .single();
 
+      if (redirect && redirect.length > 1) {
+        for (let i = 1; i < redirect.length; i++) {
+          const { data: redirect_mess } = await supabase
+            .from("messages")
+            .insert([{ chat_id: chatId, sender_id: id, content: "", redirected_id: redirect[i], show_names: redirect ? show_names : true }])
+            .select()
+            .single();
+        }
+      }
       if (receiver_nick === "ATBot") {
         const bot = BotInit(supabase);
         bot.handleMessage({
