@@ -4,6 +4,8 @@ import { broadcastNewMessage, broadcastMessageRead, broadcastMessageEdited } fro
 import crypto from "crypto";
 import path from "path";
 import { BotInit } from "./bot.js";
+import resolveOriginalRedirect from "./funcs/resolveRedirect.js";
+
 export default function (app, supabase) {
   const upload = multer({ storage: multer.memoryStorage() });
   // Проверка API
@@ -115,8 +117,27 @@ export default function (app, supabase) {
           if (redirectedError) {
             console.error("Ошибка при получении перенаправленных сообщений:", redirectedError);
           } else {
-            redirectedMsgs = data; // ДОБАВЛЕНО
             data.forEach(m => redirectedMap.set(m.id, m));
+          }
+          if (data) {
+            for (const m of data) {
+              if (m.redirected_id) {
+                m.redirected_id = await resolveOriginalRedirect(supabase, m.redirected_id);
+                // Также обновите content, files и т.д. из оригинала, если нужно
+                const { data: original } = await supabase
+                  .from("messages")
+                  .select("content, answer_id, message_files (file_url, file_name, file_type)")
+                  .eq("id", m.redirected_id)
+                  .single();
+                if (original) {
+                  m.content = original.content;
+                  m.answer_id = original.answer_id;
+                  m.message_files = original.message_files;
+                }
+              }
+              redirectedMap.set(m.id, m);
+            }
+            redirectedMsgs = data;
           }
         }
 
@@ -256,6 +277,15 @@ export default function (app, supabase) {
       }
       // Добавляем сообщение
       const createdMessages = []
+      const resolvedRedirects = [];
+      if (redirect && redirect.length > 0) {
+        for (const rid of redirect) {
+          const originalId = await resolveOriginalRedirect(supabase, rid);
+          resolvedRedirects.push(originalId);
+        }
+      }
+
+      // Теперь используем resolvedRedirects вместо redirect
       const { data: mainMessage } = await supabase
         .from("messages")
         .insert([{ 
@@ -263,26 +293,26 @@ export default function (app, supabase) {
           sender_id: id, 
           content: text || "", 
           answer_id: answer_id || null, 
-          redirected_id: redirect && redirect.length > 0 ? redirect[0] : null, 
+          redirected_id: resolvedRedirects.length > 0 ? resolvedRedirects[0] : null, 
           show_names: redirect ? show_names : true 
         }])
         .select()
         .single();
       createdMessages.push(mainMessage);
-      if (redirect && redirect.length > 1) {
-        for (let i = 1; i < redirect.length; i++) {
+
+      if (resolvedRedirects.length > 1) {
+        for (let i = 1; i < resolvedRedirects.length; i++) {
           const { data: redirectMsg } = await supabase
             .from("messages")
             .insert([{ 
-                chat_id: chatId, 
-                sender_id: id, 
-                content: "", // В дополнительных редиректах обычно нет текста пользователя
-                redirected_id: redirect[i], 
-                show_names: show_names 
+              chat_id: chatId, 
+              sender_id: id, 
+              content: "", 
+              redirected_id: resolvedRedirects[i], 
+              show_names: show_names 
             }])
             .select()
             .single();
-          
           createdMessages.push(redirectMsg);
         }
       }
@@ -293,7 +323,7 @@ export default function (app, supabase) {
           userMessage: text
         });
       }
-
+      
       let filesData = [];
       if (files.length > 0) {
         for (const file of files) {
@@ -310,7 +340,7 @@ export default function (app, supabase) {
             .from("media")
             .getPublicUrl(filePath);
           filesData.push({
-            message_id: message.id,
+            message_id: mainMessage.id,
             file_url: publicUrl,
             file_name: file.originalname, // Оригинальное имя для клиента
             file_type: file.mimetype.substring(0, 50), // Обрезаем до 50 символов
@@ -332,7 +362,7 @@ export default function (app, supabase) {
       // Б. Если есть redirected_id, получаем инфо об оригинальном сообщении
       const finalResponseMessages = [];
       
-for (const msg of createdMessages) {
+      for (const msg of createdMessages) {
         // А. Определяем файлы (только для первого сообщения)
         // Если это msg.id совпадает с mainMessage.id, берем загруженные файлы, иначе пусто
         const currentMsgFiles = (msg.id === mainMessage.id) 
