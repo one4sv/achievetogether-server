@@ -33,12 +33,14 @@ import commentsRoutes from "./comments.js"
 import offsoundRoutes from "./offsound.js"
 import toggleblockedRoutes from "./toggleblocked.js"
 import togglepinnedRoutes from "./togglepinned.js"
+import createchatRoutes from "./createchat.js"
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
 import cookieParser from "cookie-parser";
 import { createServer } from "http";
 import dotenv from "dotenv";
+
 dotenv.config();
 process.stdout.setDefaultEncoding('utf8');
 process.stderr.setDefaultEncoding('utf8');
@@ -91,6 +93,7 @@ commentsRoutes(app, supabase);
 offsoundRoutes(app, supabase);
 toggleblockedRoutes(app, supabase);
 togglepinnedRoutes(app, supabase);
+createchatRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);
