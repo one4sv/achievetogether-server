@@ -87,7 +87,8 @@ export default function (app, supabase) {
             answer_id,
             edited,
             redirected_id,
-            show_names
+            show_names,
+            is_system
           `)
           .eq("chat_id", chatId)
           .not('hidden', 'cs', `{"${id}"}`) // для uuid[] оператор cs ожидает PostgreSQL массив синтаксис
@@ -110,7 +111,8 @@ export default function (app, supabase) {
               created_at,
               message_files (file_url, file_name, file_type),
               answer_id,
-              edited
+              edited,
+              is_system
             `)
             .in("id", uniqueRedirectedIds);
 
@@ -126,7 +128,7 @@ export default function (app, supabase) {
                 // Также обновите content, files и т.д. из оригинала, если нужно
                 const { data: original } = await supabase
                   .from("messages")
-                  .select("content, answer_id, message_files (file_url, file_name, file_type)")
+                  .select("content, answer_id, message_files (file_url, file_name, file_type), is_system")
                   .eq("id", m.redirected_id)
                   .single();
                 if (original) {
@@ -207,6 +209,7 @@ export default function (app, supabase) {
         success: true,
         user: {
           id:chatWith.id,
+          nick: chatWith.nick,
           username: chatWith.username,
           avatar_url: chatWith.avatar_url,
           last_online: chatWith.last_online,
@@ -222,47 +225,267 @@ export default function (app, supabase) {
       res.status(500).json({ success: false, error: "Ошибка сервера" });
     }
   });
+
+app.get("/chat/group/:id", authenticateUser(supabase), async (req, res) => {
+  const { id: userId } = req.user;
+  const chatId = req.params.id;
+
+  try {
+    // Проверка участия в группе
+    const { data: member, error: memberError } = await supabase
+      .from("chat_members")
+      .select("id, note, pinned, is_blocked")
+      .eq("chat_id", chatId)
+      .eq("user_id", userId)
+      .single();
+
+    if (memberError || !member) {
+      return res.status(403).json({ success: false, error: "Нет доступа к чату" });
+    }
+
+    // Информация о чате
+    const { data: chat, error: chatError } = await supabase
+      .from("chats")
+      .select("id, name, avatar_url")
+      .eq("id", chatId)
+      .single();
+
+    if (chatError || !chat) {
+      return res.status(404).json({ success: false, error: "Чат не найден" });
+    }
+
+    // Участники группы
+    const { data: memberIds } = await supabase
+      .from("chat_members")
+      .select("user_id")
+      .eq("chat_id", chatId);
+
+    const userIds = memberIds?.map(m => m.user_id) || [];
+    const { data: members } = await supabase
+      .from("users")
+      .select("id, nick, username, avatar_url")
+      .in("id", userIds);
+
+    // Сообщения
+    const { data: msgs } = await supabase
+      .from("messages")
+      .select(`
+        id,
+        sender_id,
+        content,
+        created_at,
+        read_by,
+        reactions,
+        message_files (file_url, file_name, file_type),
+        answer_id,
+        edited,
+        redirected_id,
+        show_names,
+        is_system
+      `)
+      .eq("chat_id", chatId)
+      .not('hidden', 'cs', `{"${userId}"}`)
+      .order("created_at", { ascending: true });
+
+    let messages = [];
+
+    if (msgs && msgs.length > 0) {
+      // Собираем всех отправителей (включая из перенаправленных сообщений)
+      const redirectedIds = msgs
+        .map(msg => msg.redirected_id)
+        .filter(rId => rId !== null);
+      const uniqueRedirectedIds = [...new Set(redirectedIds)];
+
+      let redirectedMap = new Map();
+      let redirectedSenders = new Set();
+
+      if (uniqueRedirectedIds.length > 0) {
+        const { data: redirectedData } = await supabase
+          .from("messages")
+          .select(`
+            id,
+            sender_id,
+            content,
+            answer_id,
+            message_files (file_url, file_name, file_type),
+            is_system
+          `)
+          .in("id", uniqueRedirectedIds);
+
+        if (redirectedData) {
+          for (const m of redirectedData) {
+            if (m.redirected_id) {
+              const originalId = await resolveOriginalRedirect(supabase, m.redirected_id);
+              const { data: original } = await supabase
+                .from("messages")
+                .select("content, answer_id, message_files (file_url, file_name, file_type), is_system")
+                .eq("id", originalId)
+                .single();
+
+              if (original) {
+                m.content = original.content;
+                m.answer_id = original.answer_id;
+                m.message_files = original.message_files;
+                m.is_system = original.is_system;
+              }
+            }
+            redirectedMap.set(m.id, m);
+            redirectedSenders.add(m.sender_id);
+          }
+        }
+      }
+
+      // Все уникальные sender_id
+      const allSenderIds = new Set([
+        ...msgs.map(m => m.sender_id),
+        ...redirectedSenders,
+        userId
+      ]);
+
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, username, nick")
+        .in("id", Array.from(allSenderIds));
+
+      const userMap = {};
+      const nickMap = {};
+      (users || []).forEach(u => {
+        userMap[u.id] = u.username || u.nick;
+        nickMap[u.id] = u.nick;
+      });
+
+      // Форматируем сообщения (точно как в личном чате)
+      messages = msgs.map(msg => {
+        const redirected = msg.redirected_id ? redirectedMap.get(msg.redirected_id) : null;
+
+        return {
+          ...msg,
+          sender_name: userMap[msg.sender_id] || null,
+          sender_nick: nickMap[msg.sender_id] || null,
+          files: msg.message_files
+            ? msg.message_files.map(f => ({
+                url: f.file_url,
+                name: f.file_name,
+                type: f.file_type
+              }))
+            : [],
+          redirected_name: redirected && msg.show_names ? userMap[redirected.sender_id] : null,
+          redirected_nick: redirected && msg.show_names ? nickMap[redirected.sender_id] : null,
+          redirected_content: redirected ? redirected.content : null,
+          redirected_files: redirected
+            ? (redirected.message_files || []).map(f => ({
+                url: f.file_url,
+                name: f.file_name,
+                type: f.file_type
+              }))
+            : null,
+          redirected_answer: redirected ? redirected.answer_id : null,
+          is_system: msg.is_system
+        };
+      });
+    }
+
+    // Отметка прочитанных сообщений
+    const messagesToUpdate = messages.filter(
+      m => m.sender_id !== userId && !m.read_by.includes(userId)
+    );
+
+    if (messagesToUpdate.length > 0) {
+      for (const m of messagesToUpdate) {
+        await supabase
+          .from("messages")
+          .update({ read_by: [...m.read_by, userId] })
+          .eq("id", m.id);
+
+        broadcastMessageRead(chatId, m.id, userId);
+      }
+    }
+
+    res.json({
+      success: true,
+      chat: {
+        id: chat.id,
+        name: chat.name,
+        avatar_url: chat.avatar_url,
+        is_group: true,
+        members: members?.map(m => ({ id: m.id, nick: m.nick, avatar_url:m.avatar_url })) || [],
+        note: member.note ?? false,
+        is_blocked: member.is_blocked ?? false,
+        pinned: member.pinned ?? false,
+        am_i_blocked: false,
+        last_online: ""
+      },
+      messages
+    });
+  } catch (err) {
+    console.error("Ошибка в /chat/group/:id:", err);
+    res.status(500).json({ success: false, error: "Ошибка сервера" });
+  }
+});
+
   // Отправка сообщения (с поддержкой файлов)
   app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
-    const { id } = req.user;
-    const { receiver_nick, text, answer_id } = req.body;
-    let redirect = []
-    let show_names = true
-    if (req.body.redirect) {
-      redirect = JSON.parse(req.body.redirect)
-      show_names = req.body.showNames
-    }
-    const files = req.files || [];
-    if ((!text || !text.trim()) && files.length === 0 && redirect.length === 0) {
-      return res.status(400).json({ success: false, error: "Сообщение пустое" });
-    }
-    try {
-      // Находим receiver_id по nick
+  const { id: senderId } = req.user;
+  const { receiver_nick, chat_id: reqChatId, text, answer_id } = req.body;
+
+  let redirect = [];
+  let show_names = true;
+  if (req.body.redirect) {
+    redirect = JSON.parse(req.body.redirect);
+    show_names = req.body.showNames === "1";
+  }
+
+  const files = req.files || [];
+
+  if ((!text || !text.trim()) && files.length === 0 && redirect.length === 0) {
+    return res.status(400).json({ success: false, error: "Сообщение пустое" });
+  }
+
+  try {
+    let chatId;
+
+    // Определяем тип чата
+    if (reqChatId) {
+      // Групповой чат
+      chatId = reqChatId;
+      const { data: member } = await supabase
+        .from("chat_members")
+        .select("id")
+        .eq("chat_id", chatId)
+        .eq("user_id", senderId)
+        .single();
+
+      if (!member) {
+        return res.status(403).json({ success: false, error: "Нет доступа к группе" });
+      }
+    } else if (receiver_nick) {
+      // Приватный чат — старая логика
       const { data: receiverUser, error: receiverError } = await supabase
         .from("users")
         .select("id")
         .eq("nick", receiver_nick)
         .single();
+
       if (receiverError || !receiverUser) {
         return res.status(404).json({ success: false, error: "Пользователь не найден" });
       }
+
       const receiver_id = receiverUser.id;
 
-      // Чаты текущего пользователя
       const { data: myChats } = await supabase
         .from("chat_members")
         .select("chat_id")
-        .eq("user_id", id);
+        .eq("user_id", senderId);
       const myChatIds = myChats?.map(c => c.chat_id) || [];
-      // Чаты получателя
+
       const { data: theirChats } = await supabase
         .from("chat_members")
         .select("chat_id")
         .eq("user_id", receiver_id);
       const theirChatIds = theirChats?.map(c => c.chat_id) || [];
-      // Находим общий чат
-      let chatId = myChatIds.find(chatId => theirChatIds.includes(chatId));
-      // Если чата нет — создаём
+
+      chatId = myChatIds.find(id => theirChatIds.includes(id));
+
       if (!chatId) {
         const { data: newChat } = await supabase
           .from("chats")
@@ -271,160 +494,158 @@ export default function (app, supabase) {
           .single();
         chatId = newChat.id;
         await supabase.from("chat_members").insert([
-          { chat_id: chatId, user_id: id },
+          { chat_id: chatId, user_id: senderId },
           { chat_id: chatId, user_id: receiver_id },
         ]);
       }
-      // Добавляем сообщение
-      const createdMessages = []
-      const resolvedRedirects = [];
-      if (redirect && redirect.length > 0) {
-        for (const rid of redirect) {
-          const originalId = await resolveOriginalRedirect(supabase, rid);
-          resolvedRedirects.push(originalId);
-        }
-      }
 
-      // Теперь используем resolvedRedirects вместо redirect
-      const { data: mainMessage } = await supabase
-        .from("messages")
-        .insert([{ 
-          chat_id: chatId, 
-          sender_id: id, 
-          content: text || "", 
-          answer_id: answer_id || null, 
-          redirected_id: resolvedRedirects.length > 0 ? resolvedRedirects[0] : null, 
-          show_names: redirect ? show_names : true 
-        }])
-        .select()
-        .single();
-      createdMessages.push(mainMessage);
-
-      if (resolvedRedirects.length > 1) {
-        for (let i = 1; i < resolvedRedirects.length; i++) {
-          const { data: redirectMsg } = await supabase
-            .from("messages")
-            .insert([{ 
-              chat_id: chatId, 
-              sender_id: id, 
-              content: "", 
-              redirected_id: resolvedRedirects[i], 
-              show_names: show_names 
-            }])
-            .select()
-            .single();
-          createdMessages.push(redirectMsg);
-        }
-      }
       if (receiver_nick === "ATBot") {
         const bot = BotInit(supabase);
-        bot.handleMessage({
-          chatId,
-          userMessage: text
+        bot.handleMessage({ chatId, userMessage: text });
+      }
+    } else {
+      return res.status(400).json({ success: false, error: "Не указан получатель или группа" });
+    }
+
+    // Resolve redirect'ов
+    const resolvedRedirects = [];
+    if (redirect.length > 0) {
+      for (const rid of redirect) {
+        const originalId = await resolveOriginalRedirect(supabase, rid);
+        resolvedRedirects.push(originalId);
+      }
+    }
+
+    // Основное сообщение
+    const { data: mainMessage } = await supabase
+      .from("messages")
+      .insert([{
+        chat_id: chatId,
+        sender_id: senderId,
+        content: text || "",
+        answer_id: answer_id || null,
+        redirected_id: resolvedRedirects.length > 0 ? resolvedRedirects[0] : null,
+        show_names: redirect.length ? show_names : true
+      }])
+      .select()
+      .single();
+
+    const createdMessages = [mainMessage];
+
+    // Дополнительные redirect-сообщения (без контента и файлов)
+    if (resolvedRedirects.length > 1) {
+      for (let i = 1; i < resolvedRedirects.length; i++) {
+        const { data: redirectMsg } = await supabase
+          .from("messages")
+          .insert([{
+            chat_id: chatId,
+            sender_id: senderId,
+            content: "",
+            redirected_id: resolvedRedirects[i],
+            show_names: show_names
+          }])
+          .select()
+          .single();
+        createdMessages.push(redirectMsg);
+      }
+    }
+
+    // Загрузка файлов (только к основному сообщению)
+    let filesData = [];
+    if (files.length > 0) {
+      for (const file of files) {
+        const ext = path.extname(file.originalname);
+        const uniqueName = crypto.randomUUID() + ext;
+        const filePath = `${senderId}/${uniqueName}`;
+        const { error: uploadError } = await supabase.storage
+          .from("media")
+          .upload(filePath, file.buffer, { contentType: file.mimetype });
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from("media")
+          .getPublicUrl(filePath);
+
+        filesData.push({
+          message_id: mainMessage.id,
+          file_url: publicUrl,
+          file_name: file.originalname,
+          file_type: file.mimetype.substring(0, 50),
+          file_size: file.size
         });
       }
-      
-      let filesData = [];
-      if (files.length > 0) {
-        for (const file of files) {
-          const ext = path.extname(file.originalname); // Получаем расширение
-          const uniqueName = crypto.randomUUID() + ext; // Генерируем уникальное имя с расширением
-          const filePath = `${id}/${uniqueName}`;
-          const { error: uploadError } = await supabase.storage
-            .from("media")
-            .upload(filePath, file.buffer, { contentType: file.mimetype });
-          if (uploadError) {
-            throw uploadError;
-          }
-          const { data: { publicUrl } } = supabase.storage
-            .from("media")
-            .getPublicUrl(filePath);
-          filesData.push({
-            message_id: mainMessage.id,
-            file_url: publicUrl,
-            file_name: file.originalname, // Оригинальное имя для клиента
-            file_type: file.mimetype.substring(0, 50), // Обрезаем до 50 символов
-            file_size: file.size
-          });
-        }
-        const { error: insertError } = await supabase.from("message_files").insert(filesData);
-        if (insertError) {
-          console.error("Ошибка вставки файлов:", insertError);
-          throw insertError;
-        }
-      }
-      const { data: senderInfo } = await supabase
-        .from("users")
-        .select("username, nick")
-        .eq("id", id)
-        .single();
-
-      // Б. Если есть redirected_id, получаем инфо об оригинальном сообщении
-      const finalResponseMessages = [];
-      
-      for (const msg of createdMessages) {
-        // А. Определяем файлы (только для первого сообщения)
-        // Если это msg.id совпадает с mainMessage.id, берем загруженные файлы, иначе пусто
-        const currentMsgFiles = (msg.id === mainMessage.id) 
-           ? filesData.map(f => ({ url: f.file_url, name: f.file_name, type: f.file_type }))
-           : [];
-
-        // Б. Собираем инфо о редиректе
-        let redirectedFullInfo = {};
-        if (msg.redirected_id) {
-            const { data: originalMsg } = await supabase
-            .from("messages")
-            .select(`content, sender_id, answer_id, message_files (file_url, file_name, file_type)`)
-            .eq("id", msg.redirected_id)
-            .single();
-
-            if (originalMsg) {
-                let originalUser = null;
-                if (msg.show_names) {
-                    const { data: ou } = await supabase
-                    .from("users")
-                    .select("username, nick")
-                    .eq("id", originalMsg.sender_id)
-                    .single();
-                    originalUser = ou;
-                }
-                redirectedFullInfo = {
-                    redirected_name: originalUser ? (originalUser.username || originalUser.nick) : null,
-                    redirected_nick: originalUser ? originalUser.nick : null,
-                    redirected_content: originalMsg.content,
-                    redirected_answer: originalMsg.answer_id,
-                    redirected_files: originalMsg.message_files ? originalMsg.message_files.map(f => ({
-                        url: f.file_url, name: f.file_name, type: f.file_type
-                    })) : []
-                };
-            }
-        }
-
-        // В. Формируем полный объект
-        const completeMessage = {
-            ...msg,
-            sender_name: senderInfo ? (senderInfo.username || senderInfo.nick) : null,
-            sender_nick: senderInfo ? senderInfo.nick : null,
-            read_by: msg.read_by || [],
-            reactions: [],
-            files: currentMsgFiles,
-            ...redirectedFullInfo
-        };
-
-        // Г. ОТПРАВЛЯЕМ В СОКЕТ
-        broadcastNewMessage(chatId, completeMessage);
-        
-        // Д. Добавляем в массив для ответа API
-        finalResponseMessages.push(completeMessage);
-      }
-
-      // Возвращаем массив сообщений (клиент должен уметь принимать массив или обрабатывать WS)
-      res.json({ success: true, messages: finalResponseMessages });
-    } catch (err) {
-      console.error("Ошибка при отправке сообщения:", err);
-      res.status(500).json({ success: false, error: "Ошибка сервера" });
+      const { error: insertError } = await supabase.from("message_files").insert(filesData);
+      if (insertError) throw insertError;
     }
-  });
+
+    // Инфо отправителя
+    const { data: senderInfo } = await supabase
+      .from("users")
+      .select("username, nick")
+      .eq("id", senderId)
+      .single();
+
+    // Формируем ответ и бродкаст
+    const finalResponseMessages = [];
+
+    for (const msg of createdMessages) {
+      const currentMsgFiles = msg.id === mainMessage.id
+        ? filesData.map(f => ({ url: f.file_url, name: f.file_name, type: f.file_type }))
+        : [];
+
+      let redirectedFullInfo = {};
+      if (msg.redirected_id) {
+        const { data: originalMsg } = await supabase
+          .from("messages")
+          .select("content, sender_id, answer_id, message_files (file_url, file_name, file_type)")
+          .eq("id", msg.redirected_id)
+          .single();
+
+        if (originalMsg) {
+          let originalUser = null;
+          if (msg.show_names) {
+            const { data: ou } = await supabase
+              .from("users")
+              .select("username, nick")
+              .eq("id", originalMsg.sender_id)
+              .single();
+            originalUser = ou;
+          }
+          redirectedFullInfo = {
+            redirected_name: originalUser ? (originalUser.username || originalUser.nick) : null,
+            redirected_nick: originalUser ? originalUser.nick : null,
+            redirected_content: originalMsg.content,
+            redirected_answer: originalMsg.answer_id,
+            redirected_files: originalMsg.message_files?.map(f => ({
+              url: f.file_url, name: f.file_name, type: f.file_type
+            })) || []
+          };
+        }
+      }
+
+      const completeMessage = {
+        ...msg,
+        sender_name: senderInfo ? (senderInfo.username || senderInfo.nick) : null,
+        sender_nick: senderInfo ? senderInfo.nick : null,
+        read_by: msg.read_by || [],
+        reactions: [],
+        files: currentMsgFiles,
+        ...redirectedFullInfo,
+        is_system: false
+      };
+
+      // Бродкаст (в ws.js добавьте is_group если нужно)
+      broadcastNewMessage(chatId, completeMessage);
+
+      finalResponseMessages.push(completeMessage);
+    }
+
+    res.json({ success: true, messages: finalResponseMessages });
+  } catch (err) {
+    console.error("Ошибка при отправке сообщения:", err);
+    res.status(500).json({ success: false, error: "Ошибка сервера" });
+  }
+});
   // Редактирование сообщения (новый маршрут)
   app.patch("/messages/:id", authenticateUser(supabase), upload.array("files"), async (req, res) => {
     const { id: userId } = req.user;

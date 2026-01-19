@@ -34,6 +34,7 @@ import offsoundRoutes from "./offsound.js"
 import toggleblockedRoutes from "./toggleblocked.js"
 import togglepinnedRoutes from "./togglepinned.js"
 import createchatRoutes from "./createchat.js"
+import groupRoutes from "./group.js"
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -94,6 +95,7 @@ offsoundRoutes(app, supabase);
 toggleblockedRoutes(app, supabase);
 togglepinnedRoutes(app, supabase);
 createchatRoutes(app, supabase);
+groupRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);
