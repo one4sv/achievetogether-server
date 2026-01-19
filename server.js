@@ -35,6 +35,7 @@ import toggleblockedRoutes from "./toggleblocked.js"
 import togglepinnedRoutes from "./togglepinned.js"
 import createchatRoutes from "./createchat.js"
 import groupRoutes from "./group.js"
+import updategroupRoutes from "./updategroup.js";
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -96,6 +97,7 @@ toggleblockedRoutes(app, supabase);
 togglepinnedRoutes(app, supabase);
 createchatRoutes(app, supabase);
 groupRoutes(app, supabase);
+updategroupRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);
