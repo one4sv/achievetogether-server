@@ -332,15 +332,6 @@ export default function (app, supabase) {
         return res.status(404).json({ success: false, error: "Один или несколько пользователей не найдены" });
       }
 
-      // Username админа
-      const { data: adminUser } = await supabase
-        .from("users")
-        .select("username")
-        .eq("id", adminId)
-        .single();
-
-      const adminName = adminUser?.username || "Администратор";
-
       // Уже в группе?
       const { data: existingMembers } = await supabase
         .from("chat_members")
@@ -377,7 +368,7 @@ export default function (app, supabase) {
       const sysMessages = newMembers.map(u => ({
         chat_id: groupId,
         sender_id: adminId,
-        content: `${adminName} добавил ${u.username} в группу`,
+        content: `добавил ${u.username} в группу`,
         is_system: true,
         created_at: new Date().toISOString()
       }));
