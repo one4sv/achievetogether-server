@@ -111,7 +111,7 @@ export default function(app, supabase) {
       // Системное сообщение только для группы
       if (isGroup) {
         const avatarContent = oldAvatarUrl 
-          ? "изменил аватарку беседы" 
+          ? "обновил аватарку беседы" 
           : "установил аватарку беседы";
 
         const { error: msgError } = await supabase
