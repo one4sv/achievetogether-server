@@ -165,9 +165,11 @@ export default function (app, supabase) {
                     return res.status(403).json({ success: false, error: "Вы не состоите в этой группе" });
                 }
 
+                const canKickMembers = ["admin", "moderator"].includes(currentMember.role);
+
                 // Для исключения чужого — только админ
-                if (goal === "member" && currentMember.role !== "admin") {
-                    return res.status(403).json({ success: false, error: "Только администратор может исключать участников" });
+                if (goal === "member" && !canKickMembers) {
+                    return res.status(403).json({ success: false, error: "У вас нет прав для исключения участников"});
                 }
 
                 // Нельзя исключить/покинуть себя как админа без передачи прав (но для leave обработаем ниже)
@@ -217,10 +219,9 @@ export default function (app, supabase) {
                 let senderIdForMsg = goal === "leave" ? targetUserId : user_id; // системка от имени того, кто действие совершил
 
                 if (goal === "member") {
-                    const { data: adminUser } = await supabase.from("users").select("username").eq("id", user_id).single();
-                    actionText = `${adminUser?.username || "Администратор"} исключил ${targetName} из группы`;
+                    actionText = `исключил ${targetName} из группы`;
                 } else {
-                    actionText = `${targetName} покинул группу`;
+                    actionText = `покинул группу`;
                 }
 
                 // Системное сообщение (если в группе ещё кто-то остался)

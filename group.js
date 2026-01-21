@@ -134,7 +134,9 @@ export default function (app, supabase) {
         .eq("user_id", userId)
         .single();
 
-      if (memberError || !member || member.role === null) {
+      const canGenLink = ["admin", "moderator"].includes(member.role);
+
+      if (memberError || !member || !canGenLink) {
         return res.status(403).json({ success: false, error: "У вас нет прав для генерации ссылки"});
       }
 
@@ -317,10 +319,14 @@ export default function (app, supabase) {
         .eq("user_id", user_id)
         .single();
 
-      if (roleCheck || !roleError || roleCheck.role === null) {
-        return res.status(403).json({ success: false, error: "Только администратор может добавлять участников" });
-      }
+      console.log("Role has checked:", roleCheck.role)
 
+      if (roleError || !roleCheck || roleCheck.role === null) {
+        return res.status(403).json({
+          success: false,
+          error: "У вас нет прав на добавление участников"
+        });
+      }
       // Проверка пользователей
       const { data: usersToAdd, error: usersError } = await supabase
         .from("users")
