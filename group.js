@@ -1,6 +1,7 @@
 import { authenticateUser } from "./middleware/token.js";
 import multer from "multer"; // ← добавьте импорт
 import crypto from "crypto";
+import { broadcastGroupUpdated } from "./ws.js";
 
 const uploadNone = multer(); // ← инициализация multer
 export default function (app, supabase) {
@@ -92,7 +93,6 @@ export default function (app, supabase) {
         }));
       }
 
-      // 6. Ответ (acc — как в /acc/:nick, чтобы совпадало с GroupProvider)
       res.json({
         success: true,
         group: {
@@ -126,17 +126,17 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Некорректный group_id" });
       }
 
-      // Проверка, что пользователь — admin группы
-      // const { data: member, error: memberError } = await supabase
-      //   .from("chat_members")
-      //   .select("role")
-      //   .eq("chat_id", groupId)
-      //   .eq("user_id", userId)
-      //   .single();
+      // Проверка
+      const { data: member, error: memberError } = await supabase
+        .from("chat_members")
+        .select("role")
+        .eq("chat_id", groupId)
+        .eq("user_id", userId)
+        .single();
 
-      // if (memberError || !member || member.role !== "admin") {
-      //   return res.status(403).json({ success: false, error: "Только администратор может генерировать ссылку" });
-      // }
+      if (memberError || !member || member.role === null) {
+        return res.status(403).json({ success: false, error: "У вас нет прав для генерации ссылки"});
+      }
 
       // Генерация нового токена
       const token = crypto.randomUUID();
@@ -161,7 +161,7 @@ export default function (app, supabase) {
 
       const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
       const fullLink = `${FRONTEND_URL}/join/${token}`;
-
+      broadcastGroupUpdated(groupId);
       return res.json({ success: true, link: fullLink });
     } catch (err) {
       console.error("[generate_link] unexpected error:", err);
@@ -259,7 +259,7 @@ export default function (app, supabase) {
         console.error("[join] error:", joinError);
         return res.status(500).json({ success: false, error: "Не удалось вступить" });
       }
-
+      broadcastGroupUpdated(group.id);
       // Системное сообщение
       const { data: user } = await supabase.from("users").select("username").eq("id", userId).single();
 
@@ -308,17 +308,16 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Некорректный формат members" });
       }
 
-      const adminId = req.user.id;
+      const user_id = req.user.id;
 
-      // Проверка admin
-      const { data: adminCheck, error: adminError } = await supabase
+      const { data: roleCheck, error: roleError } = await supabase
         .from("chat_members")
         .select("role")
         .eq("chat_id", groupId)
-        .eq("user_id", adminId)
+        .eq("user_id", user_id)
         .single();
 
-      if (adminError || !adminCheck || adminCheck.role !== "admin") {
+      if (roleCheck || !roleError || roleCheck.role === null) {
         return res.status(403).json({ success: false, error: "Только администратор может добавлять участников" });
       }
 
@@ -363,11 +362,11 @@ export default function (app, supabase) {
         console.error("[addusers] insert error:", insertError);
         return res.status(500).json({ success: false, error: "Не удалось добавить участников" });
       }
-
+      broadcastGroupUpdated(groupId);
       // Системные сообщения
       const sysMessages = newMembers.map(u => ({
         chat_id: groupId,
-        sender_id: adminId,
+        sender_id: user_id,
         content: `добавил ${u.username} в группу`,
         is_system: true,
         created_at: new Date().toISOString()

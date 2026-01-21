@@ -136,7 +136,26 @@ export function broadcastMessageDeleted(chat_id, messageId, userId = null) {
         });
     }
 }
-
+export function broadcastGroupUpdated(chat_id) {
+  supabaseGlobal
+    .from("chat_members")
+    .select("user_id")
+    .eq("chat_id", chat_id)
+    .then(({ data: members }) => {
+      members?.forEach(member => {
+        const sockets = clientsMap.get(member.user_id);
+        sockets?.forEach(s => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({
+              type: "GROUP_UPDATED",
+              group_id: chat_id
+            }));
+          }
+        });
+      });
+    })
+    .catch(err => console.error("Ошибка в broadcastGroupUpdated:", err));
+}
 
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;

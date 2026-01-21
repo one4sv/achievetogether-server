@@ -299,7 +299,7 @@ export default function (app, supabase) {
             avatar_url: u.avatar_url || null,
             lastMessage: null,
             unread_count: 0,
-            note: false,
+            note: true,
             pinned: false,
             is_blocked: false,
             is_group: false,

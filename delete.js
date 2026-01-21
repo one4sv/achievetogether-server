@@ -1,9 +1,9 @@
 import { authenticateUser } from "./middleware/token.js";
-import { broadcastMessageDeleted } from "./ws.js";
+import { broadcastMessageDeleted, broadcastGroupUpdated } from "./ws.js";
 
 export default function (app, supabase) {
     app.post("/delete", authenticateUser(supabase), async (req, res) => {
-        const { goal, delete_id } = req.body;
+        const { goal, delete_id, group_id } = req.body;
         const { id: user_id } = req.user;
 
         if (!goal || !delete_id) {
@@ -135,6 +135,117 @@ export default function (app, supabase) {
                     }
                 }
             }
+            else if (goal === "member" || goal === "leave") {
+                if (!group_id) {
+                    return res.status(400).json({ success: false, error: "Не указан group_id" });
+                }
+
+                const groupId = parseInt(group_id, 10);
+                if (isNaN(groupId)) {
+                    return res.status(400).json({ success: false, error: "Некорректный group_id" });
+                }
+
+                let targetUserId = user_id; // по умолчанию — себя (leave)
+                if (goal === "member") {
+                    if (!delete_id) {
+                        return res.status(400).json({ success: false, error: "Не указан user_id для исключения" });
+                    }
+                    targetUserId = delete_id; // чужой пользователь
+                }
+
+                // Проверка: текущий пользователь в группе
+                const { data: currentMember, error: currError } = await supabase
+                    .from("chat_members")
+                    .select("role")
+                    .eq("chat_id", groupId)
+                    .eq("user_id", user_id)
+                    .single();
+
+                if (currError || !currentMember) {
+                    return res.status(403).json({ success: false, error: "Вы не состоите в этой группе" });
+                }
+
+                // Для исключения чужого — только админ
+                if (goal === "member" && currentMember.role !== "admin") {
+                    return res.status(403).json({ success: false, error: "Только администратор может исключать участников" });
+                }
+
+                // Нельзя исключить/покинуть себя как админа без передачи прав (но для leave обработаем ниже)
+                if (user_id === targetUserId && currentMember.role === "admin") {
+                    // Найдём всех участников кроме себя, отсортированных по joined_at (самый старый первый)
+                    const { data: otherMembers } = await supabase
+                    .from("chat_members")
+                    .select("user_id")
+                    .eq("chat_id", groupId)
+                    .neq("user_id", user_id)
+                    .order("joined_at", { ascending: true })
+                    .limit(1);
+
+                    if (otherMembers && otherMembers.length > 0) {
+                    // Передаём админку самому старому
+                    await supabase
+                        .from("chat_members")
+                        .update({ role: "admin" })
+                        .eq("chat_id", groupId)
+                        .eq("user_id", otherMembers[0].user_id);
+                    }
+                    // Если никого не осталось — группа удалится ниже
+                }
+
+                // Удаляем целевого пользователя из группы
+                const { error: deleteError } = await supabase
+                    .from("chat_members")
+                    .delete()
+                    .eq("chat_id", groupId)
+                    .eq("user_id", targetUserId);
+
+                if (deleteError) {
+                    console.error("[delete member/leave] delete error:", deleteError);
+                    return res.status(500).json({ success: false, error: "Не удалось выйти/исключить" });
+                }
+
+                // Имя уходящего/исключённого
+                const { data: targetUser } = await supabase
+                    .from("users")
+                    .select("username")
+                    .eq("id", targetUserId)
+                    .single();
+
+                const targetName = targetUser?.username || "Пользователь";
+
+                let actionText = goal === "leave" ? "покинул группу" : "исключил из группы";
+                let senderIdForMsg = goal === "leave" ? targetUserId : user_id; // системка от имени того, кто действие совершил
+
+                if (goal === "member") {
+                    const { data: adminUser } = await supabase.from("users").select("username").eq("id", user_id).single();
+                    actionText = `${adminUser?.username || "Администратор"} исключил ${targetName} из группы`;
+                } else {
+                    actionText = `${targetName} покинул группу`;
+                }
+
+                // Системное сообщение (если в группе ещё кто-то остался)
+                const { count: remainingMembers } = await supabase
+                    .from("chat_members")
+                    .select("id", { count: "exact" })
+                    .eq("chat_id", groupId);
+
+                if (remainingMembers && remainingMembers > 0) {
+                    await supabase.from("messages").insert({
+                    chat_id: groupId,
+                    sender_id: senderIdForMsg,
+                    content: actionText,
+                    is_system: true,
+                    created_at: new Date().toISOString()
+                    });
+
+                    broadcastGroupUpdated(groupId); // обновление у оставшихся
+                } else {
+                    await supabase.from("messages").delete().eq("chat_id", groupId);
+                    await supabase.from("chats").delete().eq("id", groupId);
+                }
+
+                return res.json({ success: true });
+                }
             else {
                 return res.status(400).json({ success: false, message: "Неверный goal" });
             }
