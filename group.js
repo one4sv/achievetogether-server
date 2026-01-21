@@ -268,7 +268,7 @@ export default function (app, supabase) {
       await supabase.from("messages").insert({
         chat_id: chatId,
         sender_id: userId,
-        content: `${user.username} присоединился по приглашению`,
+        content: `присоединился по ссылке-приглашению`,
         is_system: true,
         created_at: new Date().toISOString(),
       });

@@ -167,7 +167,6 @@ export default function (app, supabase) {
 
                 const canKickMembers = ["admin", "moderator"].includes(currentMember.role);
 
-                // Для исключения чужого — только админ
                 if (goal === "member" && !canKickMembers) {
                     return res.status(403).json({ success: false, error: "У вас нет прав для исключения участников"});
                 }
@@ -193,6 +192,7 @@ export default function (app, supabase) {
                     }
                     // Если никого не осталось — группа удалится ниже
                 }
+                broadcastGroupUpdated(groupId); // обновление у оставшихся
 
                 // Удаляем целевого пользователя из группы
                 const { error: deleteError } = await supabase
@@ -239,7 +239,6 @@ export default function (app, supabase) {
                     created_at: new Date().toISOString()
                     });
 
-                    broadcastGroupUpdated(groupId); // обновление у оставшихся
                 } else {
                     await supabase.from("messages").delete().eq("chat_id", groupId);
                     await supabase.from("chats").delete().eq("id", groupId);
