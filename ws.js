@@ -122,15 +122,17 @@ export function broadcastReaction(payload) {
 }
 
 export function broadcastKicked(payload) {
-  if (clientsMap.has(payload.id)) {
-    const sockets = clientsMap.get(payload.id);
+  const { id: targetUserId, group_id, group_name, reason } = payload;
+
+  if (clientsMap.has(targetUserId)) {
+    const sockets = clientsMap.get(targetUserId);
     sockets?.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: "KICKED_FROM_GROUP",
-          group_id: payload.group_id,
-          group_name:payload.group_name,
-          reason: payload.reason,
+          group_id,
+          group_name,
+          reason // "kicked" или "left"
         }));
       }
     });

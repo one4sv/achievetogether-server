@@ -251,7 +251,7 @@ export default function (app, supabase) {
                     await supabase.from("messages").delete().eq("chat_id", groupId);
                     await supabase.from("chats").delete().eq("id", groupId);
                 }
-                broadcastKicked({id: targetUserId, group_id: String(group_id), reason: goal, group_name: groupName})
+                broadcastKicked({id: targetUserId, group_id: String(group_id), reason: goal === "member" ? "kicked" : "left", group_name: groupName})
 
                 return res.json({ success: true });
                 }
