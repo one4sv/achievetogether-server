@@ -120,6 +120,23 @@ export function broadcastReaction(payload) {
     });
   }
 }
+
+export function broadcastKicked(payload) {
+  if (clientsMap.has(payload.id)) {
+    const sockets = clientsMap.get(payload.id);
+    sockets?.forEach(ws => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "KICKED_FROM_GROUP",
+          group_id: payload.group_id,
+          group_name:payload.group_name,
+          reason: payload.reason,
+        }));
+      }
+    });
+  }
+}
+
 export function broadcastMessageDeleted(chat_id, messageId, userId = null) {
     console.log("Broadcasting MESSAGE_DELETED", { chat_id, messageId, userId });
     for (const sockets of clientsMap.values()) {

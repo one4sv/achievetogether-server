@@ -1,5 +1,5 @@
 import { authenticateUser } from "./middleware/token.js";
-import { broadcastMessageDeleted, broadcastGroupUpdated } from "./ws.js";
+import { broadcastMessageDeleted, broadcastGroupUpdated, broadcastKicked } from "./ws.js";
 
 export default function (app, supabase) {
     app.post("/delete", authenticateUser(supabase), async (req, res) => {
@@ -192,7 +192,6 @@ export default function (app, supabase) {
                     }
                     // Если никого не осталось — группа удалится ниже
                 }
-                broadcastGroupUpdated(groupId); // обновление у оставшихся
 
                 // Удаляем целевого пользователя из группы
                 const { error: deleteError } = await supabase
@@ -215,7 +214,7 @@ export default function (app, supabase) {
 
                 const targetName = targetUser?.username || "Пользователь";
 
-                let actionText = goal === "leave" ? "покинул группу" : "исключил из группы";
+                let actionText = ""
                 let senderIdForMsg = goal === "leave" ? targetUserId : user_id; // системка от имени того, кто действие совершил
 
                 if (goal === "member") {
@@ -230,19 +229,29 @@ export default function (app, supabase) {
                     .select("id", { count: "exact" })
                     .eq("chat_id", groupId);
 
+                const { data: groupData } = await supabase
+                    .from("chats")
+                    .select("name")
+                    .eq("id", groupId)
+                    .single();
+
+                const groupName = groupData?.name || "группы";
+
                 if (remainingMembers && remainingMembers > 0) {
                     await supabase.from("messages").insert({
-                    chat_id: groupId,
-                    sender_id: senderIdForMsg,
-                    content: actionText,
-                    is_system: true,
-                    created_at: new Date().toISOString()
+                        chat_id: groupId,
+                        sender_id: senderIdForMsg,
+                        content: actionText,
+                        is_system: true,
+                        created_at: new Date().toISOString()
                     });
-
+                    broadcastGroupUpdated(groupId); // обновление у оставшихся
+                    
                 } else {
                     await supabase.from("messages").delete().eq("chat_id", groupId);
                     await supabase.from("chats").delete().eq("id", groupId);
                 }
+                broadcastKicked({id: targetUserId, group_id: String(group_id), reason: goal, group_name: groupName})
 
                 return res.json({ success: true });
                 }
