@@ -1,7 +1,7 @@
 import { authenticateUser } from "./middleware/token.js";
 import multer from "multer"; // ← добавьте импорт
 import crypto from "crypto";
-import { broadcastGroupUpdated } from "./ws.js";
+import { broadcastGroupUpdated, broadcastNewMessage } from "./ws.js";
 
 const uploadNone = multer(); // ← инициализация multer
 export default function (app, supabase) {
@@ -161,8 +161,8 @@ export default function (app, supabase) {
         return res.status(500).json({ success: false, error: "Ошибка сохранения ссылки" });
       }
 
-      const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-      const fullLink = `${FRONTEND_URL}/join/${token}`;
+      const CLIENT_URL = process.env.CLIENT_URL;
+      const fullLink = `${CLIENT_URL}/join/${token}`;
       broadcastGroupUpdated(groupId);
       return res.json({ success: true, link: fullLink });
     } catch (err) {
@@ -218,7 +218,6 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Токен не указан" });
       }
 
-      // Находим группу по токену
       const { data: group, error: groupError } = await supabase
         .from("chats")
         .select("id, invite_expires_at")
@@ -235,7 +234,6 @@ export default function (app, supabase) {
 
       const chatId = group.id;
 
-      // Проверяем, не состоит ли уже
       const { data: existing } = await supabase
         .from("chat_members")
         .select("id")
@@ -247,31 +245,65 @@ export default function (app, supabase) {
         return res.json({ success: true, already_member: true, chat_id: chatId });
       }
 
-      // Добавляем в участники
       const { error: joinError } = await supabase
         .from("chat_members")
         .insert({
           chat_id: chatId,
           user_id: userId,
           joined_at: new Date().toISOString(),
-          role: null, // обычный участник
+          role: null,
         });
 
       if (joinError) {
         console.error("[join] error:", joinError);
         return res.status(500).json({ success: false, error: "Не удалось вступить" });
       }
-      broadcastGroupUpdated(group.id);
-      // Системное сообщение
-      const { data: user } = await supabase.from("users").select("username").eq("id", userId).single();
 
-      await supabase.from("messages").insert({
-        chat_id: chatId,
-        sender_id: userId,
-        content: `присоединился по ссылке-приглашению`,
-        is_system: true,
-        created_at: new Date().toISOString(),
-      });
+      // Подгружаем имя присоединившегося
+      const { data: joinerInfo } = await supabase
+        .from("users")
+        .select("username, nick")
+        .eq("id", userId)
+        .single();
+
+      const joinerName = joinerInfo ? (joinerInfo.username || joinerInfo.nick) : "Пользователь";
+      const joinerNick = joinerInfo ? joinerInfo.nick : null;
+
+      // Системное сообщение
+      const { data: sysMsgRaw, error: sysMsgError } = await supabase
+        .from("messages")
+        .insert({
+          chat_id: chatId,
+          sender_id: userId,
+          content: `присоединился по ссылке-приглашению`,
+          is_system: true,
+          created_at: new Date().toISOString(),
+        })
+        .select("*")
+        .single();
+
+      if (sysMsgError) {
+        console.warn("[join] Не удалось добавить системное сообщение:", sysMsgError);
+      }
+
+      // Полное сообщение для broadcast с sender_name
+      if (sysMsgRaw) {
+        const sysMsg = {
+          ...sysMsgRaw,
+          sender_name: joinerName,
+          sender_nick: joinerNick,
+          files: [],
+          reactions: [],
+          read_by: [],
+          edited: false,
+          is_system: true,
+          is_pinned: false,
+        };
+
+        broadcastNewMessage(chatId, sysMsg);
+      }
+
+      broadcastGroupUpdated(chatId);
 
       res.json({ success: true, chat_id: chatId });
     } catch (err) {
@@ -279,12 +311,11 @@ export default function (app, supabase) {
       res.status(500).json({ success: false, error: "Ошибка сервера" });
     }
   });
+
   app.post("/group/addusers", authenticateUser(supabase), uploadNone.none(), async (req, res) => {
     try {
       console.log("[addusers] called, user:", req.user?.id);
-      console.log("[addusers] req.body:", req.body); // для отладки
 
-      // Защита от undefined
       if (!req.body) {
         return res.status(400).json({ success: false, error: "Нет данных в запросе" });
       }
@@ -319,18 +350,29 @@ export default function (app, supabase) {
         .eq("user_id", user_id)
         .single();
 
-      console.log("Role has checked:", roleCheck.role)
-
-      if (roleError || !roleCheck || roleCheck.role === null) {
-        return res.status(403).json({
-          success: false,
-          error: "У вас нет прав на добавление участников"
-        });
+      if (roleError || !roleCheck || !["admin", "moderator"].includes(roleCheck.role || "")) {
+        return res.status(403).json({ success: false, error: "У вас нет прав на добавление участников" });
       }
-      // Проверка пользователей
+
+      // Подгружаем имя админа (inviter)
+      const { data: inviterInfo, error: inviterError } = await supabase
+        .from("users")
+        .select("username, nick")
+        .eq("id", user_id)
+        .single();
+
+      if (inviterError || !inviterInfo) {
+        console.error("[addusers] Не удалось получить данные админа:", inviterError);
+        return res.status(500).json({ success: false, error: "Ошибка получения данных пользователя" });
+      }
+
+      const inviterName = inviterInfo.username || inviterInfo.nick || "Администратор";
+      const inviterNick = inviterInfo.nick;
+
+      // Проверка пользователей (добавляем username в select)
       const { data: usersToAdd, error: usersError } = await supabase
         .from("users")
-        .select("id, username")
+        .select("id, username, nick")
         .in("id", memberIds);
 
       if (usersError || !usersToAdd || usersToAdd.length !== memberIds.length) {
@@ -368,23 +410,44 @@ export default function (app, supabase) {
         console.error("[addusers] insert error:", insertError);
         return res.status(500).json({ success: false, error: "Не удалось добавить участников" });
       }
-      broadcastGroupUpdated(groupId);
-      // Системные сообщения
-      const sysMessages = newMembers.map(u => ({
-        chat_id: groupId,
-        sender_id: user_id,
-        content: `добавил ${u.username} в группу`,
-        is_system: true,
-        created_at: new Date().toISOString()
-      }));
 
-      const { error: msgError } = await supabase
-        .from("messages")
-        .insert(sysMessages);
+      // Системные сообщения для каждого добавленного
+      for (const u of newMembers) {
+        const { data: sysMsgRaw, error:sysMsgError } = await supabase
+          .from("messages")
+          .insert({
+            chat_id: groupId,
+            sender_id: user_id,
+            content: `добавил {} в беседу`,
+            is_system: true,
+            created_at: new Date().toISOString(),
+            target_id:u.id
+          })
+          .select("*")
+          .single();
 
-      if (msgError) {
-        console.warn("[addusers] Не удалось добавить системные сообщения:", msgError);
+        if (sysMsgError || !sysMsgRaw) {
+          console.log("sysMsgError", sysMsgError)
+          return res.status(500).json({ success: false, error: "Не удалось отправить сис. уведомления" });
+        }
+        if (sysMsgRaw) {
+          const sysMsg = {
+            ...sysMsgRaw,
+            sender_name: inviterName,
+            sender_nick: inviterNick,
+            files: [],
+            reactions: [],
+            read_by: [],
+            edited: false,
+            is_system: true,
+            is_pinned: false,
+          };
+
+          broadcastNewMessage(groupId, sysMsg);
+        }
       }
+
+      broadcastGroupUpdated(groupId);
 
       return res.json({ success: true, added: newMembers.length });
     } catch (err) {

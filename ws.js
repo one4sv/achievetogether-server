@@ -155,27 +155,57 @@ export function broadcastMessageDeleted(chat_id, messageId, userId = null) {
         });
     }
 }
-export function broadcastGroupUpdated(chat_id) {
-  supabaseGlobal
-    .from("chat_members")
-    .select("user_id")
-    .eq("chat_id", chat_id)
-    .then(({ data: members }) => {
-      members?.forEach(member => {
-        const sockets = clientsMap.get(member.user_id);
-        sockets?.forEach(s => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({
-              type: "GROUP_UPDATED",
-              group_id: chat_id
-            }));
-          }
-        });
+export async function broadcastGroupUpdated(chat_id) {
+  console.log("Broadcasting GROUP_UPDATED", {chat_id});
+  try {
+    const { data: members } = await supabaseGlobal
+      .from("chat_members")
+      .select("user_id")
+      .eq("chat_id", chat_id);
+
+    if (!members || members.length === 0) return;
+
+    for (const member of members) {
+      const sockets = clientsMap.get(member.user_id);
+      sockets?.forEach(s => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: "GROUP_UPDATED",
+            group_id: chat_id
+          }));
+        }
       });
-    })
-    .catch(err => console.error("Ошибка в broadcastGroupUpdated:", err));
+    }
+  } catch (err) {
+    console.error("Ошибка в broadcastGroupUpdated:", err);
+  }
 }
 
+export async function broadcastPinToggle(chat_id, message_id, is_pinned) {
+  try {
+    const { data: members } = await supabaseGlobal
+      .from("chat_members")
+      .select("user_id")
+      .eq("chat_id", chat_id);
+
+    if (!members || members.length === 0) return;
+
+    for (const member of members) {
+      const sockets = clientsMap.get(member.user_id);
+      sockets?.forEach(s => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: "MESSAGE_PIN_TOGGLED",
+            message_id,
+            is_pinned,
+          }));
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Ошибка в broadcastPinToggle:", err);
+  }
+}
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
   const wss = new WebSocketServer({ server, path: "/ws" });

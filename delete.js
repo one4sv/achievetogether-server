@@ -212,15 +212,13 @@ export default function (app, supabase) {
                     .eq("id", targetUserId)
                     .single();
 
-                const targetName = targetUser?.username || "Пользователь";
-
                 let actionText = ""
                 let senderIdForMsg = goal === "leave" ? targetUserId : user_id; // системка от имени того, кто действие совершил
 
                 if (goal === "member") {
-                    actionText = `исключил ${targetName} из группы`;
+                    actionText = `исключил {} из беседы`;
                 } else {
-                    actionText = `покинул группу`;
+                    actionText = `покинул беседу`;
                 }
 
                 // Системное сообщение (если в группе ещё кто-то остался)
@@ -243,15 +241,15 @@ export default function (app, supabase) {
                         sender_id: senderIdForMsg,
                         content: actionText,
                         is_system: true,
-                        created_at: new Date().toISOString()
+                        created_at: new Date().toISOString(),
+                        target_id:targetUserId
                     });
-                    broadcastGroupUpdated(groupId); // обновление у оставшихся
-                    
+                broadcastKicked({id: targetUserId, group_id: String(group_id), reason: goal === "member" ? "kicked" : "left", group_name: groupName})
+                broadcastGroupUpdated(groupId); // обновление у оставшихся
                 } else {
                     await supabase.from("messages").delete().eq("chat_id", groupId);
                     await supabase.from("chats").delete().eq("id", groupId);
                 }
-                broadcastKicked({id: targetUserId, group_id: String(group_id), reason: goal === "member" ? "kicked" : "left", group_name: groupName})
 
                 return res.json({ success: true });
                 }
