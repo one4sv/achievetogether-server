@@ -274,15 +274,9 @@ export default function initWebSocket(supabase, server) {
             console.error("Ошибка поиска пользователя по nick для TYPING:", err);
           }
         }
-        // Получаем nick отправителя
-        const { data: fromUser } = await supabaseGlobal
-          .from("users")
-          .select("nick")
-          .eq("id", userId)
-          .single();
         targetSockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({ ...data, from: fromUser?.nick || null }));  // Изменено на from: nick
+            s.send(JSON.stringify({ ...data, from: userId }));  // Исправлено: from = userId (ID отправителя)
           }
         });
       }
