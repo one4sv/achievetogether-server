@@ -35,18 +35,6 @@ export default function(app, supabase) {
 
       const chatId = message.chat_id;
 
-      // Проверка участия
-      const { data: member, error: memberError } = await supabase
-        .from("chat_members")
-        .select("role")
-        .eq("chat_id", chatId)
-        .eq("user_id", userId)
-        .single();
-
-      if (memberError || !member) {
-        return res.status(403).json({ success: false, error: "Вы не состоите в этом чате" });
-      }
-
       // Тип чата
       const { data: chat, error: chatError } = await supabase
         .from("chats")
@@ -56,12 +44,6 @@ export default function(app, supabase) {
 
       if (chatError || !chat) {
         return res.status(500).json({ success: false, error: "Ошибка получения данных чата" });
-      }
-
-      // Права
-      const canPin = !chat.is_group || ["admin", "moderator"].includes(member.role || "");
-      if (!canPin) {
-        return res.status(403).json({ success: false, error: "У вас нет прав для закрепления сообщений" });
       }
 
       // Toggle
