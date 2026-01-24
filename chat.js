@@ -30,15 +30,17 @@ export default function (app, supabase) {
 
       const { data: myChats } = await supabase
         .from("chat_members")
-        .select("chat_id")
-        .eq("user_id", id);
+        .select("chat_id, chats!inner(is_group)")
+        .eq("user_id", id)
+        .eq("chats.is_group", false);
 
       const myChatIds = (myChats || []).map(c => c.chat_id);
 
       const { data: theirChats } = await supabase
         .from("chat_members")
-        .select("chat_id")
-        .eq("user_id", chatWith.id);
+        .select("chat_id, chats!inner(is_group)")
+        .eq("user_id", chatWith.id)
+        .eq("chats.is_group", false);
 
       const theirChatIds = (theirChats || []).map(c => c.chat_id);
 
@@ -208,8 +210,9 @@ export default function (app, supabase) {
           note: chatMember.note,
           is_blocked: chatMember.is_blocked,
           pinned: chatMember.pinned,
-          am_i_blocked: chatWith.am_i_blocked
+          am_i_blocked: chatWith.am_i_blocked,
         },
+        chat_id:chatId,
         messages,
       });
     } catch (err) {
@@ -463,14 +466,18 @@ export default function (app, supabase) {
 
       const { data: myChats } = await supabase
         .from("chat_members")
-        .select("chat_id")
-        .eq("user_id", senderId);
+        .select("chat_id, chats!inner(is_group)")
+        .eq("user_id", senderId)
+        .eq("chats.is_groop", false);
+
       const myChatIds = myChats?.map(c => c.chat_id) || [];
 
       const { data: theirChats } = await supabase
         .from("chat_members")
-        .select("chat_id")
-        .eq("user_id", receiver_id);
+        .select("chat_id, chats!inner(is_group)")
+        .eq("user_id", receiver_id)
+        .eq("chats.is_groop", false);
+
       const theirChatIds = theirChats?.map(c => c.chat_id) || [];
 
       chatId = myChatIds.find(id => theirChatIds.includes(id));

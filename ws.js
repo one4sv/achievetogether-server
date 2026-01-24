@@ -1,5 +1,4 @@
 import { WebSocketServer, WebSocket } from "ws";
-
 let clientsMap = new Map(); // userId -> Set(ws)
 let supabaseGlobal;
 let broadcastUserStatus;
@@ -19,37 +18,50 @@ export async function broadcastNewMessage(chat_id, message) {
       .select("user_id, note")
       .eq("chat_id", chat_id);
 
+    // Добавьте проверку: если members null/пусто, пропустите или залоггируйте
+    if (!members || members.length === 0) {
+      console.warn(`No members found for chat_id: ${chat_id}. Skipping broadcast.`);
+      return;
+    }
+
+    const { data: chat } = await supabaseGlobal
+      .from("chats")
+      .select("name, is_group")
+      .eq("chat_id", chat_id)
+      .single();  // Добавьте .single() если ожидается одна запись, иначе вернёт массив
+
     // Получаем глобальные настройки для всех участников
-    const userIds = members?.map(m => m.user_id) || [];
+    const userIds = members.map(m => m.user_id);
     const { data: settingsList } = await supabaseGlobal
       .from("settings")
       .select("user_id, all_note, new_mess_note")
       .in("user_id", userIds);
 
     // Создаем мапу userId => settings
-    const settingsMap = new Map(settingsList.map(s => [s.user_id, s]));
+    const settingsMap = new Map(settingsList?.map(s => [s.user_id, s]) || []);
 
-    for (const member of members || []) {
+    for (const member of members) {
       const userId = member.user_id;
       const userSettings = settingsMap.get(userId);
-
       // Проверяем настройки (если настроек нет, считаем true по умолчанию)
       const allNote = userSettings?.all_note ?? true;
       const newMessNote = userSettings?.new_mess_note ?? true;
-      const chatNote = member.note;
+      const chatNote = member.note ?? true;  // Добавьте дефолт для chatNote
       console.log("UserId:", userId, "allNote:", allNote, "newMessNote:", newMessNote, "chatNote:", chatNote);
-      
+     
       if (allNote && newMessNote && chatNote) {
         const sockets = clientsMap.get(userId);
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
             s.send(JSON.stringify({
               type: "NEW_MESSAGE",
-              chatId: chat_id,
+              chat_id: chat_id,
+              chat_name: chat?.name || undefined,  // ← Здесь исправление: optional chaining
               message,
               nick: senderData?.nick || null,
               username: senderData?.username || null,
-              is_note: chatNote
+              is_note: chatNote,
+              is_group:chat.is_group
             }));
           }
         });
@@ -81,7 +93,6 @@ export function broadcastMessageEdited(chat_id, message) {
     })
     .catch(err => console.error("Ошибка в broadcastMessageEdited:", err));
 }
-
 export function broadcastMessageRead(chat_id, messageId, userId) {
   supabaseGlobal
     .from("chat_members")
@@ -103,7 +114,6 @@ export function broadcastMessageRead(chat_id, messageId, userId) {
       });
     });
 }
-
 export function broadcastReaction(payload) {
   const { messageId, user_id, reaction, removed } = payload;
   for (const sockets of clientsMap.values()) {
@@ -120,10 +130,8 @@ export function broadcastReaction(payload) {
     });
   }
 }
-
 export function broadcastKicked(payload) {
   const { id: targetUserId, group_id, group_name, reason } = payload;
-
   if (clientsMap.has(targetUserId)) {
     const sockets = clientsMap.get(targetUserId);
     sockets?.forEach(ws => {
@@ -138,7 +146,6 @@ export function broadcastKicked(payload) {
     });
   }
 }
-
 export function broadcastMessageDeleted(chat_id, messageId, userId = null) {
     console.log("Broadcasting MESSAGE_DELETED", { chat_id, messageId, userId });
     for (const sockets of clientsMap.values()) {
@@ -162,9 +169,7 @@ export async function broadcastGroupUpdated(chat_id) {
       .from("chat_members")
       .select("user_id")
       .eq("chat_id", chat_id);
-
     if (!members || members.length === 0) return;
-
     for (const member of members) {
       const sockets = clientsMap.get(member.user_id);
       sockets?.forEach(s => {
@@ -180,16 +185,13 @@ export async function broadcastGroupUpdated(chat_id) {
     console.error("Ошибка в broadcastGroupUpdated:", err);
   }
 }
-
 export async function broadcastPinToggle(chat_id, message_id, is_pinned) {
   try {
     const { data: members } = await supabaseGlobal
       .from("chat_members")
       .select("user_id")
       .eq("chat_id", chat_id);
-
     if (!members || members.length === 0) return;
-
     for (const member of members) {
       const sockets = clientsMap.get(member.user_id);
       sockets?.forEach(s => {
@@ -257,28 +259,61 @@ export default function initWebSocket(supabase, server) {
     ws.on("message", async (msg) => {
       const data = JSON.parse(msg.toString());
       if (data.type === "TYPING" || data.type === "STOP_TYPING") {
-        // data.to может быть id или nick — сначала пробуем как id
-        let targetSockets = clientsMap.get(data.to);
-        if (!targetSockets) {
-          // попробуем найти пользователя по nick
-          try {
-            const { data: userByNick } = await supabaseGlobal
-              .from("users")
-              .select("id")
-              .eq("nick", data.to)
-              .single();
-            if (userByNick) {
-              targetSockets = clientsMap.get(userByNick.id);
-            }
-          } catch (err) {
-            console.error("Ошибка поиска пользователя по nick для TYPING:", err);
-          }
-        }
-        targetSockets?.forEach(s => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({ ...data, from: userId }));  // Исправлено: from = userId (ID отправителя)
-          }
+        // Получаем информацию об отправителе
+        const { data: fromUser } = await supabaseGlobal
+          .from("users")
+          .select("username, nick")
+          .eq("id", userId)
+          .single();
+
+        const payload = JSON.stringify({
+          ...data,
+          from: userId,
+          sender_name: fromUser?.username || fromUser?.nick || 'Аноним',
+          chat_id: data.is_group ? data.to : null
         });
+
+        if (data.is_group) {
+          const groupId = data.to;
+          const { data: members } = await supabaseGlobal
+            .from("chat_members")
+            .select("user_id")
+            .eq("chat_id", groupId);
+          if (members) {
+            members.forEach(member => {
+              if (member.user_id !== userId) { // Исключаем отправителя
+                const sockets = clientsMap.get(member.user_id);
+                sockets?.forEach(s => {
+                  if (s.readyState === WebSocket.OPEN) {
+                    s.send(payload);
+                  }
+                });
+              }
+            });
+          }
+        } else {
+          let targetSockets = clientsMap.get(data.to);
+          if (!targetSockets) {
+            // попробуем найти пользователя по nick
+            try {
+              const { data: userByNick } = await supabaseGlobal
+                .from("users")
+                .select("id")
+                .eq("nick", data.to)
+                .single();
+              if (userByNick) {
+                targetSockets = clientsMap.get(userByNick.id);
+              }
+            } catch (err) {
+              console.error("Ошибка поиска пользователя по nick для TYPING:", err);
+            }
+          }
+          targetSockets?.forEach(s => {
+            if (s.readyState === WebSocket.OPEN) {
+              s.send(payload);
+            }
+          });
+        }
       }
       // сюда можно добавить обработку других типов (реакции и т.д.)
     });
