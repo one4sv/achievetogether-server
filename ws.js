@@ -27,8 +27,13 @@ export async function broadcastNewMessage(chat_id, message) {
     const { data: chat } = await supabaseGlobal
       .from("chats")
       .select("name, is_group")
-      .eq("chat_id", chat_id)
+      .eq("id", chat_id)
       .single();  // Добавьте .single() если ожидается одна запись, иначе вернёт массив
+
+    if (!chat) {
+      console.warn(`Chat not found for chat_id: ${chat_id}. Skipping broadcast.`);
+      return;
+    }
 
     // Получаем глобальные настройки для всех участников
     const userIds = members.map(m => m.user_id);
@@ -61,7 +66,7 @@ export async function broadcastNewMessage(chat_id, message) {
               nick: senderData?.nick || null,
               username: senderData?.username || null,
               is_note: chatNote,
-              is_group:chat.is_group
+              is_group: chat.is_group
             }));
           }
         });

@@ -468,7 +468,7 @@ export default function (app, supabase) {
         .from("chat_members")
         .select("chat_id, chats!inner(is_group)")
         .eq("user_id", senderId)
-        .eq("chats.is_groop", false);
+        .eq("chats.is_group", false);
 
       const myChatIds = myChats?.map(c => c.chat_id) || [];
 
@@ -476,7 +476,7 @@ export default function (app, supabase) {
         .from("chat_members")
         .select("chat_id, chats!inner(is_group)")
         .eq("user_id", receiver_id)
-        .eq("chats.is_groop", false);
+        .eq("chats.is_group", false);
 
       const theirChatIds = theirChats?.map(c => c.chat_id) || [];
 
