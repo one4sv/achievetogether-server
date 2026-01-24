@@ -38,6 +38,7 @@ import groupRoutes from "./group.js"
 import updategroupRoutes from "./updategroup.js";
 import pinmessRoutes from "./pinmess.js"
 import identifyuserRoutes from "./identifyuser.js"
+import getpermissionsRoutes from "./getpermissions.js";
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -102,6 +103,7 @@ groupRoutes(app, supabase);
 updategroupRoutes(app, supabase);
 pinmessRoutes(app, supabase)
 identifyuserRoutes(app, supabase);
+getpermissionsRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);

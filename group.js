@@ -2,8 +2,12 @@ import { authenticateUser } from "./middleware/token.js";
 import multer from "multer"; // ← добавьте импорт
 import crypto from "crypto";
 import { broadcastGroupUpdated, broadcastNewMessage } from "./ws.js";
+import { hasServerPermission } from "./funcs/hasPermission.js";
+import { PERMS } from "./PERMS.js";
 
 const uploadNone = multer(); // ← инициализация multer
+const ALL_PERM_KEYS = Object.values(PERMS);
+
 export default function (app, supabase) {
   app.get("/group/:id", authenticateUser(supabase), async (req, res) => {
     const { id: userId } = req.user;
@@ -22,7 +26,6 @@ export default function (app, supabase) {
         return res.status(403).json({ success: false, error: "Нет доступа к группе" });
       }
 
-      // 2. Информация о группе (предполагаем, что в таблице chats есть поле desc)
       const { data: group, error: groupError } = await supabase
         .from("chats")
         .select("id, name, avatar_url, desc, invite_token, invite_expires_at")
@@ -41,7 +44,7 @@ export default function (app, supabase) {
       // 3. Участники группы (с role из chat_members)
       const { data: groupMembers } = await supabase
         .from("chat_members")
-        .select("user_id, role")
+        .select("user_id, role_id")
         .eq("chat_id", groupId);
 
       const memberUserIds = groupMembers?.map(m => m.user_id) || [];
@@ -51,6 +54,15 @@ export default function (app, supabase) {
         .select("id, username, nick, avatar_url, last_online")
         .in("id", memberUserIds);
 
+      // Получаем имена ролей
+      const roleIds = groupMembers?.map(m => m.role_id).filter(Boolean) || [];
+      const { data: roles } = roleIds.length > 0
+        ? await supabase.from("chat_roles").select("id, name").in("id", roleIds)
+        : { data: [] };
+
+      const roleMap = {};
+      roles?.forEach(r => roleMap[r.id] = r.name);
+
       const members = (memberUsers || []).map(u => {
         const gm = groupMembers.find(g => g.user_id === u.id);
         return {
@@ -58,7 +70,8 @@ export default function (app, supabase) {
           name: u.username || null,
           nick: u.nick,
           avatar_url: u.avatar_url || null,
-          role: gm?.role || null,
+          role_id: gm?.role_id || null,
+          role_name: gm?.role_id ? roleMap[gm.role_id] || "member" : "member",
           last_online: u.last_online || null,
         };
       });
@@ -77,6 +90,10 @@ export default function (app, supabase) {
 
       const messageIds = messageIdsData?.map(m => m.id) || [];
 
+      const myPerms = {};
+      for (const key of ALL_PERM_KEYS) {
+        myPerms[key] = await hasServerPermission(supabase, groupId, userId, key);
+      }
       let media = [];
       if (messageIds.length > 0) {
         const { data: files } = await supabase
@@ -106,6 +123,7 @@ export default function (app, supabase) {
         habits: habits || [],
         members,
         media,
+        my_perms:myPerms
       });
     } catch (err) {
       console.error("Ошибка в /group/:id:", err);
@@ -126,18 +144,8 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Некорректный group_id" });
       }
 
-      // Проверка
-      const { data: member, error: memberError } = await supabase
-        .from("chat_members")
-        .select("role")
-        .eq("chat_id", groupId)
-        .eq("user_id", userId)
-        .single();
-
-      const canGenLink = ["admin", "moderator"].includes(member.role);
-
-      if (memberError || !member || !canGenLink) {
-        return res.status(403).json({ success: false, error: "У вас нет прав для генерации ссылки"});
+      if (!(await hasServerPermission(supabase, groupId, userId, PERMS.can_invite_users))) {
+        return res.status(403).json({ success: false, error: "У вас нет прав для генерации ссылки" });
       }
 
       // Генерация нового токена
@@ -220,7 +228,7 @@ export default function (app, supabase) {
 
       const { data: group, error: groupError } = await supabase
         .from("chats")
-        .select("id, invite_expires_at")
+        .select("id, invite_expires_at, default_role_id")
         .eq("invite_token", token)
         .single();
 
@@ -251,7 +259,7 @@ export default function (app, supabase) {
           chat_id: chatId,
           user_id: userId,
           joined_at: new Date().toISOString(),
-          role: null,
+          role_id: group.default_role_id,
         });
 
       if (joinError) {
@@ -314,21 +322,14 @@ export default function (app, supabase) {
 
   app.post("/group/addusers", authenticateUser(supabase), uploadNone.none(), async (req, res) => {
     try {
-      console.log("[addusers] called, user:", req.user?.id);
-
-      if (!req.body) {
-        return res.status(400).json({ success: false, error: "Нет данных в запросе" });
-      }
-
+      const userId = req.user.id;
       let { group_id: groupIdRaw, members: membersJson } = req.body;
 
-      if (!groupIdRaw || !membersJson) {
-        return res.status(400).json({ success: false, error: "Не указаны group_id или members" });
-      }
-
       const groupId = parseInt(groupIdRaw, 10);
-      if (isNaN(groupId)) {
-        return res.status(400).json({ success: false, error: "Некорректный group_id" });
+      if (isNaN(groupId)) return res.status(400).json({ success: false, error: "Некорректный group_id" });
+
+      if (!(await hasServerPermission(supabase, groupId, userId, PERMS.can_invite_users))) {
+        return res.status(403).json({ success: false, error: "У вас нет прав на добавление участников" });
       }
 
       let memberIds = [];
@@ -341,24 +342,11 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Некорректный формат members" });
       }
 
-      const user_id = req.user.id;
-
-      const { data: roleCheck, error: roleError } = await supabase
-        .from("chat_members")
-        .select("role")
-        .eq("chat_id", groupId)
-        .eq("user_id", user_id)
-        .single();
-
-      if (roleError || !roleCheck || !["admin", "moderator"].includes(roleCheck.role || "")) {
-        return res.status(403).json({ success: false, error: "У вас нет прав на добавление участников" });
-      }
-
       // Подгружаем имя админа (inviter)
       const { data: inviterInfo, error: inviterError } = await supabase
         .from("users")
         .select("username, nick")
-        .eq("id", user_id)
+        .eq("id", userId)
         .single();
 
       if (inviterError || !inviterInfo) {
@@ -369,6 +357,11 @@ export default function (app, supabase) {
       const inviterName = inviterInfo.username || inviterInfo.nick || "Администратор";
       const inviterNick = inviterInfo.nick;
 
+      const { data: chat } = await supabase
+        .from("chats")
+        .select("default_role_id")
+        .eq("id", groupId)
+        .single();
       // Проверка пользователей (добавляем username в select)
       const { data: usersToAdd, error: usersError } = await supabase
         .from("users")
@@ -399,7 +392,7 @@ export default function (app, supabase) {
         chat_id: groupId,
         user_id: u.id,
         joined_at: new Date().toISOString(),
-        role: null
+        role_id:chat.default_role_id
       }));
 
       const { error: insertError } = await supabase
@@ -417,7 +410,7 @@ export default function (app, supabase) {
           .from("messages")
           .insert({
             chat_id: groupId,
-            sender_id: user_id,
+            sender_id: userId,
             content: `добавил {} в беседу`,
             is_system: true,
             created_at: new Date().toISOString(),

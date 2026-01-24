@@ -1,11 +1,13 @@
+// createchat route (исправленный и доработанный)
 import { authenticateUser } from "./middleware/token.js";
 import multer from "multer";
 import crypto from "crypto";
 import path from "path";
+import { PERMS } from "./PERMS.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 } // 5 MB, как в примере uploadavatar
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
 
 export default function (app, supabase) {
@@ -25,17 +27,9 @@ export default function (app, supabase) {
     });
   }, async (req, res) => {
     try {
-      console.log("[createchat] called, user:", req.user?.id);
       const { id: creatorId } = req.user;
       const { name, desc, members } = req.body;
       const avatarFile = req.file;
-
-      console.log("[createchat] body:", { name, desc, members });
-      if (avatarFile) {
-        console.log("[createchat] file:", { originalname: avatarFile.originalname, mimetype: avatarFile.mimetype, size: avatarFile.size });
-      } else {
-        console.log("[createchat] no file in request");
-      }
 
       if (!name || name.trim() === "") {
         return res.status(400).json({ success: false, error: "Название чата обязательно" });
@@ -43,23 +37,20 @@ export default function (app, supabase) {
 
       let parsedMembers = [];
       try {
-        parsedMembers = JSON.parse(members);
+        parsedMembers = JSON.parse(members || "[]");
         if (!Array.isArray(parsedMembers) || parsedMembers.length < 1) {
           return res.status(400).json({ success: false, error: "Выберите хотя бы одного участника" });
         }
       } catch (err) {
-        console.error("[createchat] Ошибка парсинга members:", err);
         return res.status(400).json({ success: false, error: "Некорректный список участников" });
       }
 
-      // Проверяем, что участники существуют
-      const { data: users, error: usersError } = await supabase
+      const { data: existingUsers, error: usersError } = await supabase
         .from("users")
         .select("id")
         .in("id", parsedMembers);
 
-      if (usersError || users.length !== parsedMembers.length) {
-        console.error("[createchat] Ошибка проверки пользователей:", usersError);
+      if (usersError || existingUsers.length !== parsedMembers.length) {
         return res.status(404).json({ success: false, error: "Один или несколько участников не найдены" });
       }
 
@@ -68,19 +59,14 @@ export default function (app, supabase) {
         const ext = path.extname(avatarFile.originalname);
         const uniqueName = crypto.randomUUID() + ext;
         const filePath = `chat_avatars/${uniqueName}`;
-        const bucket = "chat_avatars";
         const { error: uploadError } = await supabase.storage
-          .from(bucket)
+          .from("chat_avatars")
           .upload(filePath, avatarFile.buffer, { contentType: avatarFile.mimetype });
-        if (uploadError) {
-          console.error("[createchat] Ошибка загрузки аватара:", uploadError);
-          throw uploadError;
-        }
-        const { data: { publicUrl } } = supabase.storage
-          .from(bucket)
-          .getPublicUrl(filePath);
-        avatarUrl = publicUrl;
-        console.log("[createchat] avatarUrl:", avatarUrl);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage.from("chat_avatars").getPublicUrl(filePath);
+        avatarUrl = urlData.publicUrl;
       }
 
       // Создаём чат
@@ -96,49 +82,125 @@ export default function (app, supabase) {
         .select("id")
         .single();
 
-      if (chatError || !newChat) {
-        console.error("[createchat] Ошибка создания чата:", chatError);
-        throw chatError || new Error("Не удалось создать чат");
-      }
+      if (chatError || !newChat) throw chatError || new Error("Не удалось создать чат");
 
       const chatId = newChat.id;
-      console.log("[createchat] new chatId:", chatId);
 
-      // Добавляем участников, включая создателя
-      const allMembers = [...new Set([creatorId, ...parsedMembers])];
-      const chatMembers = allMembers.map(userId => ({
+      // 1. Member (default)
+      const { data: defaultRole } = await supabase
+        .from("chat_roles")
+        .insert({
+          chat_id: chatId,
+          name: "member",
+          rank: 20,
+          is_default: true,
+          permissions: {
+            [PERMS.redirect_messages]: true,
+          },
+          is_editable:true
+        })
+        .select("id")
+        .single();
+
+      // 2. Moderator
+      await supabase.from("chat_roles").insert({
+        chat_id: chatId,
+        name: "moderator",
+        rank: 50,
+        permissions: {
+          [PERMS.pin_messages]: true,
+          [PERMS.redirect_messages]: true,
+          [PERMS.delete_others]: true,
+          [PERMS.kick_users]: true,
+          [PERMS.can_invite_users]: true,
+        },
+          is_editable:true
+      });
+
+      // 3. Admin
+      await supabase.from("chat_roles").insert({
+        chat_id: chatId,
+        name: "admin",
+        rank: 80,
+        permissions: {
+          [PERMS.change_avatar]: true,
+          [PERMS.change_name]: true,
+          [PERMS.change_desc]: true,
+          [PERMS.pin_messages]: true,
+          [PERMS.redirect_messages]: true,
+          [PERMS.delete_others]: true,
+          [PERMS.manage_roles]: true,
+          [PERMS.kick_users]: true,
+          [PERMS.ban_users]: true,
+          [PERMS.can_invite_users]: true,
+        },
+        is_editable:false,
+        desc:"Полные права упраления беседой, права не могут быть изменены, не может быть переименована или удалена. "
+      });
+
+      // 4. Owner (для создателя)
+      const { data: ownerRole } = await supabase
+        .from("chat_roles")
+        .insert({
+          chat_id: chatId,
+          name: "owner",
+          rank: 100,
+          is_default: false,
+          permissions: {
+            [PERMS.change_avatar]: true,
+            [PERMS.change_name]: true,
+            [PERMS.change_desc]: true,
+            [PERMS.pin_messages]: true,
+            [PERMS.redirect_messages]: true,
+            [PERMS.delete_others]: true,
+            [PERMS.manage_roles]: true,
+            [PERMS.kick_users]: true,
+            [PERMS.ban_users]: true,
+            [PERMS.can_invite_users]: true,
+          },
+          is_editable:false,
+          desc:`В беседе может быть только один владелец.
+            Имеет наивысший приоритет, права не могут быть изменены, не может быть переименована или удалена.
+            В случае выхода владельца его роль автоматически передаётся участнику с ролью следующего уровня приоритета, который дольше остальных находится в беседе.`
+        })
+        .select("id")
+        .single();
+
+      // Устанавливаем default роль
+      await supabase
+        .from("chats")
+        .update({ default_role_id: defaultRole.id })
+        .eq("id", chatId);
+
+      // Добавляем участников
+      const allMemberIds = [...new Set([creatorId, ...parsedMembers])];
+
+      const chatMembersInserts = allMemberIds.map(userId => ({
         chat_id: chatId,
         user_id: userId,
-        joined_at: new Date().toISOString(),
-        role: userId === creatorId ? 'admin' : null
+        role_id: userId === creatorId ? ownerRole.id : defaultRole.id,
       }));
 
       const { error: membersError } = await supabase
         .from("chat_members")
-        .insert(chatMembers);
+        .insert(chatMembersInserts);
 
       if (membersError) {
-        console.error("[createchat] Ошибка добавления участников:", membersError);
-        // Rollback
         await supabase.from("chats").delete().eq("id", chatId);
         throw membersError;
       }
 
       // Системное сообщение
-      const { error: sysMsgError } = await supabase.from("messages").insert({
+      await supabase.from("messages").insert({
         chat_id: chatId,
         sender_id: creatorId,
-        content: `Чат "${name}" создан`,
+        content: `создал беседу "${name}"`,
         is_system: true,
-        created_at: new Date().toISOString()
       });
-      if (sysMsgError) {
-        console.warn("[createchat] Ошибка системного сообщения:", sysMsgError);
-      }
 
       res.json({ success: true, chat_id: chatId });
     } catch (err) {
-      console.error("[createchat] Неожиданная ошибка:", err);
+      console.error("[createchat] Ошибка:", err);
       res.status(500).json({ success: false, error: "Ошибка сервера", detail: err.message });
     }
   });
