@@ -20,7 +20,6 @@ export default function(app, supabase) {
             res.json({
                 success: true,
                 order: data.order,
-                amountHabits:data.amountHabits,
                 theme:data.theme,
                 private:data.private,
                 acsent:data.acsent,

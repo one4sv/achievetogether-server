@@ -20,7 +20,7 @@ export default function (app, supabase) {
       // Берём все привычки
       const { data: habits, error: errorHabit } = await supabase
         .from("habits")
-        .select("id, name")
+        .select("id, name, is_archieve")
         .eq("user_id", user_id);
 
       if (errorHabit) {
@@ -52,6 +52,7 @@ export default function (app, supabase) {
             comment,
             created_at: item.created_at,
             isDone: true, // <-- добавляем
+            is_archieve: habit?.is_archieve ?? false
           };
         }),
         // Комментарии без выполнения
@@ -65,6 +66,7 @@ export default function (app, supabase) {
               date: c.date,
               comment: c.comment,
               isDone: false, // <-- явно false
+              is_archieve:habit?.is_archieve ?? false
             };
           })
       ];

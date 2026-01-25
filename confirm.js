@@ -45,7 +45,6 @@ export default function (app, supabase) {
         await supabase.from("settings").insert({
           user_id: newUser.id,
           order: ["everyday", "weekly", "sometimes"],
-          amountHabits: [5, 5, 5, 5, 5],
           private: {
             mail: "contacts",
             posts: "all",

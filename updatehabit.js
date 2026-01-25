@@ -31,7 +31,8 @@ export default function (app, supabase) {
             'start_time',
             'end_time',
             'pinned',
-            'tag'
+            'tag',
+            'is_archieve'
         ];
 
         if (!validFields.includes(field)) {
