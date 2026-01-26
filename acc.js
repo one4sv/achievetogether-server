@@ -18,22 +18,36 @@ export default function (app, supabase) {
       }
       if (accError) throw accError;
 
-      // --- 2. Получаем привычки
-      const { data: habits, error: habitsError } = await supabase
+      // --- Получаем настройки (show_archived и private за один запрос, чтобы оптимизировать)
+      const { data: settingsData, error: settingsError } = await supabase
+        .from("settings")
+        .select("show_archived_in_acc, private")
+        .eq("user_id", acc.id)
+        .maybeSingle();
+
+      if (settingsError) {
+        console.error(settingsError);
+        throw settingsError;
+      }
+
+      // show_archived по умолчанию false, если настройки не найдены
+      const showArchived = settingsData?.show_archived_in_acc ?? false;
+      const isPrivate = settingsData?.private ?? false;
+
+      // --- 2. Получаем привычки с фильтрацией по архиву
+      let habitsQuery = supabase
         .from("habits")
         .select("*")
         .eq("user_id", acc.id);
+
+      if (!showArchived) {
+        habitsQuery = habitsQuery.eq("is_archived", false);
+      }
+
+      const { data: habits, error: habitsError } = await habitsQuery;
       if (habitsError) throw habitsError;
 
-      // --- 3. Приватные настройки
-      const { data: settings, error: privateError } = await supabase
-        .from("settings")
-        .select("private")
-        .eq("user_id", acc.id)
-        .single();
-      if (privateError) throw privateError;
-
-      // --- 4. Посты
+      // --- 3. Посты
       const { data: posts, error: postsError } = await supabase
         .from("posts")
         .select("*")
@@ -41,7 +55,7 @@ export default function (app, supabase) {
         .order("created_at", { ascending: false });
       if (postsError) throw postsError;
 
-      // --- 5. Получаем ID чатов, где есть оба пользователя
+      // --- 4. Получаем медиа из общих чатов (оставлено без изменений)
       const { data: userChats } = await supabase
         .from("chat_members")
         .select("chat_id")
@@ -58,7 +72,6 @@ export default function (app, supabase) {
 
       let media = [];
       if (commonChatIds.length > 0) {
-        // 1️⃣ Получаем все id сообщений из общих чатов
         const { data: messages, error: msgError } = await supabase
           .from("messages")
           .select("id")
@@ -90,7 +103,7 @@ export default function (app, supabase) {
         success: true,
         acc,
         habits,
-        privateRules: settings?.private || {},
+        privateRules: isPrivate, // или settingsData?.private ?? {}
         posts: posts || [],
         media,
       });

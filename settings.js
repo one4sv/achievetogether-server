@@ -29,6 +29,8 @@ export default function(app, supabase) {
                 twoAuth:data.two_auth,
                 all_note:data.all_note,
                 new_mess_note:data.new_mess_note,
+                show_archived:data.show_archived,
+                show_archived_in_acc:data.show_archived_in_acc
             });
         } catch (err) {
             console.error("Ошибка запроса к Supabase:", err);

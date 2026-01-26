@@ -32,7 +32,7 @@ export default function (app, supabase) {
             'end_time',
             'pinned',
             'tag',
-            'is_archieve'
+            'is_archived'
         ];
 
         if (!validFields.includes(field)) {
