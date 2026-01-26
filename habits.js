@@ -8,31 +8,10 @@ export default function (app, supabase) {
         });
 
         try {
-            // Получаем настройку show_archieved (по умолчанию false)
-            const { data: settings, error: settingsError } = await supabase
-                .from("settings")
-                .select("show_archived")
-                .eq("user_id", userId)
-                .maybeSingle();
-
-            if (settingsError) {
-                console.error(settingsError);
-                return res.status(500).json({ success: false, error: "Ошибка получения настройки" });
-            }
-
-            const showArchived = settings?.show_archived ?? false;
-
-            // Запрос привычек с фильтрацией по архиву
-            let habitsQuery = supabase
+            const { data: habitsArr, error: habitsError } = await supabase
                 .from("habits")
                 .select("*")
                 .eq("user_id", userId);
-
-            if (!showArchived) {
-                habitsQuery = habitsQuery.eq("is_archived", false);
-            }
-
-            const { data: habitsArr, error: habitsError } = await habitsQuery;
 
             if (habitsError) {
                 console.error(habitsError);
