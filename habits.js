@@ -83,7 +83,7 @@ export default function (app, supabase) {
             const showArchived = settings?.show_archived_in_acc ?? false;
 
             // Если архивирована и не разрешено показывать — скрываем
-            if (!showArchived && habit.is_archived) {
+            if (!showArchived && habit.is_archived && habit.user_id !== currentUserId) {
                 return res.status(403).json({ success: false, error: "Пользователь скрыл активность" });
             }
 
