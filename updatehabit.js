@@ -6,7 +6,7 @@ export default function (app, supabase) {
     });
 
     app.post('/updatehabit', authenticateUser(supabase), async (req, res) => {
-        const { habit_id, ...updateData } = req.body;
+        const { habit_id, table, ...updateData } = req.body;
         const field = Object.keys(updateData)[0];
         const value = updateData[field];
         const { id: user_id } = req.user;
@@ -17,26 +17,6 @@ export default function (app, supabase) {
 
         if (!habit_id) {
             return res.status(400).json({ error: 'ID привычки обязателен' });
-        }
-
-        // Проверка допустимых полей
-        const validFields = [
-            'name',
-            'desc',
-            'start_date',
-            'end_date',
-            'ongoing',
-            'periodicity',
-            'chosen_days',
-            'start_time',
-            'end_time',
-            'pinned',
-            'tag',
-            'is_archived'
-        ];
-
-        if (!validFields.includes(field)) {
-            return res.status(400).json({ error: 'Недопустимое поле для обновления' });
         }
 
         try {
@@ -54,14 +34,62 @@ export default function (app, supabase) {
                 return res.status(403).json({ error: 'Нет доступа к этой привычке' });
             }
 
+            // Определяем допустимые поля в зависимости от таблицы
+            let validFields = [];
+            if (table === 'habits') {
+                validFields = [
+                    'name',
+                    'desc',
+                    'start_date',
+                    'end_date',
+                    'ongoing',
+                    'periodicity',
+                    'chosen_days',
+                    'start_time',
+                    'end_time',
+                    'pinned',
+                    'tag',
+                    'is_archived'
+                ];
+            } else if (table === 'habits_settings') {
+                validFields = ['timer', 'schedule'];
+            } else {
+                return res.status(400).json({ error: 'Недопустимая таблица' });
+            }
+
+            if (!validFields.includes(field)) {
+                return res.status(400).json({ error: 'Недопустимое поле для обновления' });
+            }
+
             let formattedValue = value;
             if (field === 'start_date' || field === 'end_date') {
                 formattedValue = value ? new Date(value).toISOString().split('T')[0] : null;
             }
+
+            let needId = habit_id;
+            if (table === 'habits_settings') {
+                const { data: setting, error: setting_error } = await supabase
+                    .from('habits_settings')
+                    .select('id')
+                    .eq('habit_id', habit_id)
+                    .single();
+
+                if (setting_error) {
+                    console.error('Ошибка при поиске настроек:', setting_error);
+                    return res.status(500).json({ error: 'Ошибка сервера при поиске настроек' });
+                }
+
+                if (!setting) {
+                    return res.status(404).json({ error: 'Настройки не найдены' });
+                }
+
+                needId = setting.id;
+            }
+
             const { error } = await supabase
-                .from('habits')
+                .from(table)
                 .update({ [field]: formattedValue })
-                .eq('id', habit_id);
+                .eq('id', needId);
 
             if (error) throw error;
             return res.status(200).json({ success: true });

@@ -320,7 +320,6 @@ export default function initWebSocket(supabase, server) {
           });
         }
       }
-      // сюда можно добавить обработку других типов (реакции и т.д.)
     });
     ws.on("close", async () => {
       console.log(`🔴 WS disconnected: user ${userId}`);
@@ -328,7 +327,6 @@ export default function initWebSocket(supabase, server) {
       clientsMap.get(userId)?.delete(ws);
       if (!clientsMap.get(userId)?.size) {
         clientsMap.delete(userId);
-        // Обновляем last_online
         await supabase
           .from("users")
           .update({ last_online: new Date().toISOString() })
@@ -346,6 +344,9 @@ export default function initWebSocket(supabase, server) {
         .select("last_online, nick")
         .eq("id", userId)
         .single();
+      if (error) {
+        console.log(error)
+      }
       if (!error && data) {
         last_online = data.last_online;
         nick = data.nick;
@@ -366,6 +367,6 @@ export default function initWebSocket(supabase, server) {
       }
     );
     }
-    console.log("✅ WebSocket initialized on /ws");
   }
+  console.log("WebSocket initialized on /ws");
 }

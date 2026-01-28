@@ -67,20 +67,29 @@ export default function (app, supabase) {
                 console.error(habitError);
                 return res.status(404).json({ success: false, error: "Активность не найдена" });
             }
-
-            // Получаем настройку show_archieved владельца привычки
             const { data: settings, error: settingsError } = await supabase
+                .from("habits_settings")
+                .select("*")
+                .eq("habit_id", habitId)
+                .single()
+
+            if (settingsError) {
+                console.error(settingsError);
+                return res.status(500).json({ success: false, error: "Ошибка получения настройек привычки" });
+            }
+            // Получаем настройку show_archieved владельца привычки
+            const { data: privacy, error: privacyError } = await supabase
                 .from("settings")
                 .select("show_archived_in_acc")
                 .eq("user_id", habit.user_id)
                 .maybeSingle();
 
-            if (settingsError) {
-                console.error(settingsError);
+            if (privacyError) {
+                console.error(privacyError);
                 return res.status(500).json({ success: false, error: "Ошибка получения настройки" });
             }
 
-            const showArchived = settings?.show_archived_in_acc ?? false;
+            const showArchived = privacy?.show_archived_in_acc ?? false;
 
             // Если архивирована и не разрешено показывать — скрываем
             if (!showArchived && habit.is_archived && habit.user_id !== currentUserId) {
@@ -130,6 +139,7 @@ export default function (app, supabase) {
                 isDone,
                 isRead,
                 comment,
+                settings
             });
         } catch (err) {
             console.error("Ошибка запроса к Supabase:", err);
