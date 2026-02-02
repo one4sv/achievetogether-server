@@ -40,6 +40,7 @@ import pinmessRoutes from "./pinmess.js"
 import identifyuserRoutes from "./identifyuser.js"
 import getpermissionsRoutes from "./getpermissions.js";
 import editpermissionsRoutes from "./editpermissions.js";
+import timerRoutes from "./timer.js";
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -106,6 +107,7 @@ pinmessRoutes(app, supabase)
 identifyuserRoutes(app, supabase);
 getpermissionsRoutes(app, supabase);
 editpermissionsRoutes(app, supabase);
+timerRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);

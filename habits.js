@@ -54,7 +54,6 @@ export default function (app, supabase) {
     app.get("/habits/:id", authenticateUser(supabase), async (req, res) => {
         const { id: currentUserId } = req.user;
         const { id: habitId } = req.params;
-
         try {
             // Получаем привычку
             const { data: habit, error: habitError } = await supabase
@@ -99,6 +98,8 @@ export default function (app, supabase) {
             const today = new Date().toLocaleDateString("en-CA", {
                 timeZone: "Europe/Moscow",
             });
+            const startOfDay = new Date(`${today}T00:00:00+03:00`).toISOString();
+            const endOfDay = new Date(new Date(startOfDay).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
             // Выполнение за сегодня (для текущего пользователя)
             const { data: completion, error: completionError } = await supabase
@@ -133,13 +134,43 @@ export default function (app, supabase) {
 
             const comment = commentData?.comment || "";
 
+            let timer = null;
+            if (!isRead) {
+                const { data: timerData, error: timerError } = await supabase
+                    .from("habit_timers")
+                    .select("id, started_at, end_at, status, pauses, curcles")
+                    .eq("habit_id", habitId)
+                    .gte("end_at", startOfDay)
+                    .lt("end_at", endOfDay)
+                    .order("started_at", { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (timerError) {
+                    console.error(timerError);
+                    return res.status(500).json({ success: false, error: "Ошибка получения таймера" });
+                }
+
+                if (timerData) {
+                    timer = {
+                        id: Number(timerData.id),
+                        started_at: timerData.started_at,
+                        end_at: timerData.end_at,
+                        status: timerData.status,
+                        pauses: timerData.pauses || [],
+                        curcles: timerData.curcles || []
+                    };
+                }
+            }
+
             res.json({
                 success: true,
                 habit,
                 isDone,
                 isRead,
                 comment,
-                settings
+                settings,
+                timer
             });
         } catch (err) {
             console.error("Ошибка запроса к Supabase:", err);
