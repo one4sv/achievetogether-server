@@ -138,7 +138,7 @@ export default function (app, supabase) {
             if (!isRead) {
                 const { data: timerData, error: timerError } = await supabase
                     .from("habit_timers")
-                    .select("id, started_at, end_at, status, pauses, curcles")
+                    .select("id, started_at, end_at, status, pauses, circles")
                     .eq("habit_id", habitId)
                     .gte("end_at", startOfDay)
                     .lt("end_at", endOfDay)
@@ -158,7 +158,7 @@ export default function (app, supabase) {
                         end_at: timerData.end_at,
                         status: timerData.status,
                         pauses: timerData.pauses || [],
-                        curcles: timerData.curcles || []
+                        circles: timerData.circles || []
                     };
                 }
             }

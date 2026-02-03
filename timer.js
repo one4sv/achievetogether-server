@@ -22,10 +22,9 @@ export default function(app, supabase) {
                 return res.status(404).json({ success: false, error: "Привычка не найдена или нет доступа" });
             }
 
-            // Получаем таймеры, у которых end_at сегодня
             const { data: timerData, error: timerError } = await supabase
                 .from("habit_timers")
-                .select("id, started_at, end_at, status, pauses, curcles")
+                .select("id, started_at, end_at, status, pauses, circles")
                 .eq("habit_id", habitId)
                 .gte("end_at", startOfDay)
                 .lt("end_at", endOfDay)
@@ -47,7 +46,7 @@ export default function(app, supabase) {
                 end_at: timerData.end_at,
                 status: timerData.status,
                 pauses: timerData.pauses || [],
-                curcles: timerData.curcles || []
+                circles: timerData.circles || []
             };
 
             res.json({ success: true, timer });
@@ -144,7 +143,7 @@ export default function(app, supabase) {
                         started_at: startedAt.toISOString(),
                         end_at: endDate.toISOString(),
                         status: "running",
-                        curcles: [],
+                        circles: [],
                         pauses: []
                     })
                     .select("id")
@@ -164,10 +163,10 @@ export default function(app, supabase) {
 
     app.post("/timer/pause", authenticateUser(supabase), async (req, res) => {
         const { id: userId } = req.user;
-        const { habit_id: habitId, time, timer_id: timerId } = req.body;
+        const { habit_id: habitId, time, timer, timer_id: timerId } = req.body;
 
-        if (!habitId || !time || !timerId) {
-            return res.status(400).json({ success: false, error: "Не указан ID привычки, время или ID таймера" });
+        if (!habitId || !time || !timerId || !timer) {                    // ← добавлена проверка !timer
+            return res.status(400).json({ success: false, error: "Не указан ID привычки, время, текущее значение таймера или ID таймера" });
         }
 
         try {
@@ -199,8 +198,15 @@ export default function(app, supabase) {
                 return res.status(400).json({ success: false, error: "Таймер не запущен" });
             }
 
-            const pauses = timerData.pauses || [];
-            pauses.push({ start: new Date(time).toISOString(), end: null });
+            const pauseTime = new Date(time);
+
+            // Добавляем новую паузу с присланным значением timer
+            const pauses = timerData.pauses ? [...timerData.pauses] : [];
+            pauses.push({
+                start: pauseTime.toISOString(),
+                time: timer,           // ← используем присланное значение напрямую
+                end: null
+            });
 
             const { error: updateError } = await supabase
                 .from("habit_timers")
@@ -331,7 +337,7 @@ export default function(app, supabase) {
         }
     });
 
-    app.post("/timer/curcle", authenticateUser(supabase), async (req, res) => {
+    app.post("/timer/circle", authenticateUser(supabase), async (req, res) => {
         const { id: userId } = req.user;
         const { habit_id: habitId, time, timer_id: timerId, timer } = req.body;
 
@@ -352,7 +358,6 @@ export default function(app, supabase) {
                 return res.status(404).json({ success: false, error: "Привычка не найдена или нет доступа" });
             }
 
-            // Получаем таймер
             const { data: timerData, error: timerError } = await supabase
                 .from("habit_timers")
                 .select("*")
@@ -368,12 +373,12 @@ export default function(app, supabase) {
                 return res.status(400).json({ success: false, error: "Таймер не запущен" });
             }
 
-            const curcles = timerData.curcles || [];
-            curcles.push({ time: timer, text: null });
+            const circles = timerData.circles || [];
+            circles.push({ time: timer, text: null });
 
             const { error: updateError } = await supabase
                 .from("habit_timers")
-                .update({ curcles })
+                .update({ circles })
                 .eq("id", timerId);
 
             if (updateError) {
@@ -382,7 +387,67 @@ export default function(app, supabase) {
 
             res.json({ success: true });
         } catch (err) {
-            console.error("Ошибка при добавлении curcle:", err);
+            console.error("Ошибка при добавлении circle:", err);
+            res.status(500).json({ success: false, error: "Ошибка сервера" });
+        }
+    });
+    app.post("/timer/circle/text", authenticateUser(supabase), async (req, res) => {
+        const { id: userId } = req.user;
+        const { habit_id: habitId, timer_id: timerId, time, text } = req.body;
+
+        if (!habitId || !timerId || !time || !text) {
+            return res.status(400).json({ success: false, error: "Не указаны необходимые параметры" });
+        }
+
+        try {
+            const { data: habit, error: habitError } = await supabase
+                .from("habits")
+                .select("id")
+                .eq("id", habitId)
+                .eq("user_id", userId)
+                .single();
+
+            if (habitError || !habit) {
+                return res.status(404).json({ success: false, error: "Привычка не найдена или нет доступа" });
+            }
+
+            const { data: timerData, error: timerError } = await supabase
+                .from("habit_timers")
+                .select("*")
+                .eq("id", timerId)
+                .eq("habit_id", habitId)
+                .single();
+
+            if (timerError || !timerData) {
+                return res.status(404).json({ success: false, error: "Таймер не найден" });
+            }
+
+            const circles = timerData.circles || [];
+            let updated = false;
+            for (let c of circles) {
+                if (c.time === time) {
+                    c.text = text;
+                    updated = true;
+                    break;
+                }
+            }
+
+            if (!updated) {
+                return res.status(404).json({ success: false, error: "Круг с таким временем не найден" });
+            }
+
+            const { error: updateError } = await supabase
+                .from("habit_timers")
+                .update({ circles })
+                .eq("id", timerId);
+
+            if (updateError) {
+                throw updateError;
+            }
+
+            res.json({ success: true });
+        } catch (err) {
+            console.error("Ошибка обновления текста круга:", err);
             res.status(500).json({ success: false, error: "Ошибка сервера" });
         }
     });
