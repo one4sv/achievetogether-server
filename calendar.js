@@ -154,11 +154,38 @@ export default function (app, supabase) {
         console.log(timersError);
         return res.status(500).json({ success: false, error: "Ошибка при получении таймеров" });
       }
+      const { data: countersData, error: countersError } = await supabase
+        .from("habit_counters")
+        .select("id, created_at, count, progression, min_count")
+        .eq("habit_id", habitId)
+        .order("created_at", { ascending: false });
+
+      if (countersError) {
+        console.log(countersError);
+        return res.status(500).json({ success: false, error: "Ошибка при получении счётчиков" });
+      }
+
+      const parsedCounters = (countersData || []).map(c => ({
+        id: c.id,
+        started_at: new Date(c.created_at),
+        count: Number(c.count),
+        min_count: Number(c.min_count),
+        progression: (() => {
+          const arr = c.progression || [];
+          const last = arr[arr.length - 1];
+          return last ? {
+            count: Number(last.count || 0),
+            time: new Date(last.time),
+            text: last.text || ""
+          } : { count: 0, time: new Date(c.created_at), text: "" };
+        })()
+      }));
 
       res.json({ 
         success: true, 
         calendar: mapped, 
-        timers: timersData || [] 
+        timers: timersData || [],
+        counters: parsedCounters
       });
     } catch (err) {
       console.error("Ошибка запроса к Supabase:", err);

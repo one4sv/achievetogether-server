@@ -56,13 +56,22 @@ export default function (app, supabase) {
       return res.status(500).json({ habitError: "Failed to add habit" });
     }
 
-    const { settingsError } = await supabase.from("habits_settings").insert({
+    const { error: settingsError } = await supabase.from("habits_settings").insert({
       habit_id: habit.id
     })
 
     if (settingsError) {
       console.error("Supabase settings insert error:", settingsError);
       return res.status(500).json({ settingsError: "Failed to setting habit" });
+    }
+
+    const { error: counterError } = await supabase.from("counter_settings").insert({
+      habit_id: habit.id
+    })
+
+    if (counterError) {
+      console.error("Supabase counter settings insert error:", counterError);
+      return res.status(500).json({ counterError: "Failed to add counter settings" });
     }
 
     res.status(200).json({ success: true });

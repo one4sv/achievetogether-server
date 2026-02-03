@@ -52,7 +52,7 @@ export default function (app, supabase) {
                     'is_archived'
                 ];
             } else if (table === 'habits_settings') {
-                validFields = ['timer', 'schedule'];
+                validFields = ['metric_type', 'schedule'];
             } else {
                 return res.status(400).json({ error: 'Недопустимая таблица' });
             }

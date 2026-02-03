@@ -41,6 +41,7 @@ import identifyuserRoutes from "./identifyuser.js"
 import getpermissionsRoutes from "./getpermissions.js";
 import editpermissionsRoutes from "./editpermissions.js";
 import timerRoutes from "./timer.js";
+import counterRoutes from "./counter.js";
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -108,6 +109,7 @@ identifyuserRoutes(app, supabase);
 getpermissionsRoutes(app, supabase);
 editpermissionsRoutes(app, supabase);
 timerRoutes(app, supabase);
+counterRoutes(app, supabase);
 logoutRoutes(app);
 
 const server = createServer(app);

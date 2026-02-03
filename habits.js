@@ -66,6 +66,7 @@ export default function (app, supabase) {
                 console.error(habitError);
                 return res.status(404).json({ success: false, error: "Активность не найдена" });
             }
+
             const { data: settings, error: settingsError } = await supabase
                 .from("habits_settings")
                 .select("*")
@@ -76,7 +77,26 @@ export default function (app, supabase) {
                 console.error(settingsError);
                 return res.status(500).json({ success: false, error: "Ошибка получения настройек привычки" });
             }
-            // Получаем настройку show_archieved владельца привычки
+
+            // Настройки счётчика (всегда, даже для read-only)
+            const { data: counterSetRaw, error: counterSetError } = await supabase
+                .from("counter_settings")
+                .select(`id, min_counter, "redCounterRight", "redCounterLeft"`)
+                .eq("habit_id", habitId)
+                .maybeSingle();
+
+            if (counterSetError) {
+                console.error(counterSetError);
+                return res.status(500).json({ success: false, error: "Ошибка получения настроек счётчика" });
+            }
+
+            const counterSettings = counterSetRaw ? {
+                id: counterSetRaw.id,
+                min_count: Number(counterSetRaw.min_counter),
+                redCountRight: Number(counterSetRaw.redCounterRight),
+                redCountLeft: counterSetRaw.redCounterLeft !== null ? Number(counterSetRaw.redCounterLeft) : null
+            } : null;
+
             const { data: privacy, error: privacyError } = await supabase
                 .from("settings")
                 .select("show_archived_in_acc")
@@ -90,7 +110,6 @@ export default function (app, supabase) {
 
             const showArchived = privacy?.show_archived_in_acc ?? false;
 
-            // Если архивирована и не разрешено показывать — скрываем
             if (!showArchived && habit.is_archived && habit.user_id !== currentUserId) {
                 return res.status(403).json({ success: false, error: "Пользователь скрыл активность" });
             }
@@ -163,6 +182,41 @@ export default function (app, supabase) {
                 }
             }
 
+            let counter = null;
+            if (!isRead) {
+                const { data: counterData, error: counterError } = await supabase
+                    .from("habit_counters")
+                    .select("id, created_at, count, progression, min_count")
+                    .eq("habit_id", habitId)
+                    .gte("created_at", startOfDay)
+                    .lt("created_at", endOfDay)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (counterError) {
+                    console.error(counterError);
+                    return res.status(500).json({ success: false, error: "Ошибка получения счётчика" });
+                }
+
+                if (counterData) {
+                    const progressionArray = counterData.progression || [];
+                    const lastProgress = progressionArray.length > 0 ? progressionArray[progressionArray.length - 1] : null;
+
+                    counter = {
+                        id: counterData.id,
+                        started_at: new Date(counterData.created_at),
+                        count: Number(counterData.count),
+                        progression: lastProgress ? {
+                            count: Number(lastProgress.count || 0),
+                            time: new Date(lastProgress.time),
+                            text: lastProgress.text || ""
+                        } : { count: 0, time: new Date(), text: "" },
+                        min_count: Number(counterData.min_count)
+                    };
+                }
+            }
+
             res.json({
                 success: true,
                 habit,
@@ -170,7 +224,9 @@ export default function (app, supabase) {
                 isRead,
                 comment,
                 settings,
-                timer
+                timer,
+                counter,
+                counterSettings
             });
         } catch (err) {
             console.error("Ошибка запроса к Supabase:", err);
