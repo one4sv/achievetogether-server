@@ -170,15 +170,11 @@ export default function (app, supabase) {
         started_at: new Date(c.created_at),
         count: Number(c.count),
         min_count: Number(c.min_count),
-        progression: (() => {
-          const arr = c.progression || [];
-          const last = arr[arr.length - 1];
-          return last ? {
-            count: Number(last.count || 0),
-            time: new Date(last.time),
-            text: last.text || ""
-          } : { count: 0, time: new Date(c.created_at), text: "" };
-        })()
+        progression: (c.progression || []).map(p => ({
+          count: Number(p.count || 0),
+          time: new Date(p.time),
+          text: p.text || ""
+        }))
       }));
 
       res.json({ 

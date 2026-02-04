@@ -10,7 +10,11 @@ export default function (app, supabase) {
     const start = new Date(`${today}T00:00:00+03:00`).toISOString();
     const end = new Date(new Date(start).getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
 
-    return { start, end };
+    return { start, end, today };  // Добавил today для completed_at
+  };
+
+  const getTodayDate = () => {
+    return getTodayRange().today;  // 'YYYY-MM-DD'
   };
 
   const checkHabitOwner = async (habit_id, user_id) => {
@@ -43,7 +47,7 @@ export default function (app, supabase) {
       .from("habit_counters")
       .insert({
         habit_id,
-        count: min_count,
+        count: 0,
         progression: [],
         min_count
       })
@@ -70,7 +74,34 @@ export default function (app, supabase) {
     return data?.min_counter ?? 0;
   };
 
-  app.post("/counter/plus", authenticateUser(supabase), async (req, res) => {
+  // Helper для обновления completion
+  const checkAndUpdateCompletion = async (habit_id, user_id, old_state, new_state) => {
+    const today = getTodayDate();
+
+    if (!old_state && new_state) {
+      // Добавляем completion
+      const { error } = await supabase
+        .from("habit_completions")
+        .insert({
+          habit_id,
+          completed_at: today,
+          user_id
+        });
+
+      if (error) throw error;
+    } else if (old_state && !new_state) {
+      // Удаляем completion
+      const { error } = await supabase
+        .from("habit_completions")
+        .delete()
+        .eq("habit_id", habit_id)
+        .eq("completed_at", today);
+
+      if (error) throw error;
+    }
+  };
+
+  app.post("/counter/value", authenticateUser(supabase), async (req, res) => {
     const { id: user_id } = req.user;
     const { habit_id, val } = req.body;
 
@@ -85,7 +116,11 @@ export default function (app, supabase) {
       const min_count = await getMinCount(habit_id);
       const counter = await getOrCreateTodayCounter(habit_id, min_count);
 
-      const newCount = Math.max(min_count, Number(counter.count) + val);
+      const oldCount = Number(counter.count);
+      const newCount = Math.max(0, oldCount + val);
+
+      const old_state = oldCount >= min_count;
+      const new_state = newCount >= min_count;
 
       const progressEntry = {
         count: val,
@@ -95,7 +130,7 @@ export default function (app, supabase) {
 
       const newProgression = [...(counter.progression || []), progressEntry];
 
-      const { error } = await supabase
+      const { error: updateError } = await supabase
         .from("habit_counters")
         .update({
           count: newCount,
@@ -103,7 +138,60 @@ export default function (app, supabase) {
         })
         .eq("id", counter.id);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
+
+      // Обновляем completion
+      await checkAndUpdateCompletion(habit_id, user_id, old_state, new_state);
+
+      res.json({ success: true });
+
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ success: false });
+    }
+  });
+
+  app.post("/counter/restore", authenticateUser(supabase), async (req, res) => {
+    const { id: user_id } = req.user;
+    const { habit_id } = req.body;
+
+    if (!habit_id) return res.status(400).json({ success: false });
+
+    try {
+      const owner = await checkHabitOwner(habit_id, user_id);
+      if (!owner) return res.status(403).json({ success: false });
+
+      const min_count = await getMinCount(habit_id);
+      const counter = await getOrCreateTodayCounter(habit_id, min_count);
+
+      const oldCount = Number(counter.count);
+      const delta = 0 - oldCount;
+
+      let newProgression = [...(counter.progression || [])];
+
+      if (delta !== 0) {
+        newProgression.push({
+          count: delta,
+          time: new Date().toISOString(),
+          text: "Сброс"
+        });
+      }
+
+      const old_state = oldCount >= min_count;
+      const new_state = 0 >= min_count;  // Обычно false, если min_count > 0
+
+      const { error: updateError } = await supabase
+        .from("habit_counters")
+        .update({
+          count: 0,
+          progression: newProgression
+        })
+        .eq("id", counter.id);
+
+      if (updateError) throw updateError;
+
+      // Обновляем completion
+      await checkAndUpdateCompletion(habit_id, user_id, old_state, new_state);
 
       res.json({ success: true });
 
@@ -115,7 +203,7 @@ export default function (app, supabase) {
 
   app.post("/counter/settings", authenticateUser(supabase), async (req, res) => {
     const { id: user_id } = req.user;
-    const { habit_id, min_counter, redCounterLeft, redCounterRight } = req.body;
+    const { habit_id, min_counter, red_counter_left, red_counter_right } = req.body;
 
     if (!habit_id) return res.status(400).json({ success: false });
 
@@ -125,34 +213,54 @@ export default function (app, supabase) {
 
       const payload = {};
       if (typeof min_counter === "number") payload.min_counter = min_counter;
-      if (typeof redCounterLeft === "number") payload.red_count_left = redCounterLeft;
-      if (typeof redCounterRight === "number") payload.red_count_right = redCounterRight;
+      if (typeof red_counter_left === "number") payload.red_counter_left = red_counter_left;
+      if (typeof red_counter_right === "number") payload.red_counter_right = red_counter_right;
 
-      const { error } = await supabase
+      if (Object.keys(payload).length === 0) return res.status(400).json({ success: false });
+
+      const { data: existing } = await supabase
         .from("counter_settings")
-        .upsert(
-          {
+        .select("habit_id")
+        .eq("habit_id", habit_id)
+        .maybeSingle();
+
+      if (existing) {
+        const { error } = await supabase
+          .from("counter_settings")
+          .update(payload)
+          .eq("habit_id", habit_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("counter_settings")
+          .insert({
             habit_id,
             ...payload
-          },
-          { onConflict: "habit_id" }
-        );
-
-      if (error) throw error;
+          });
+        if (error) throw error;
+      }
 
       if (typeof min_counter === "number") {
         const todayCounter = await getTodayCounter(habit_id);
 
         if (todayCounter) {
-          const newCount = Math.max(min_counter, Number(todayCounter.count));
+          const old_min = todayCounter.min_count;
+          const current_count = todayCounter.count;
 
-          await supabase
+          const old_state = current_count >= old_min;
+          const new_state = current_count >= min_counter;
+
+          const { error: updateError } = await supabase
             .from("habit_counters")
             .update({
               min_count: min_counter,
-              count: newCount
             })
             .eq("id", todayCounter.id);
+
+          if (updateError) throw updateError;
+
+          // Обновляем completion
+          await checkAndUpdateCompletion(habit_id, user_id, old_state, new_state);
         }
       }
 

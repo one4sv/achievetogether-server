@@ -81,7 +81,7 @@ export default function (app, supabase) {
             // Настройки счётчика (всегда, даже для read-only)
             const { data: counterSetRaw, error: counterSetError } = await supabase
                 .from("counter_settings")
-                .select(`id, min_counter, "redCounterRight", "redCounterLeft"`)
+                .select(`id, min_counter, "red_counter_right", "red_counter_left"`)
                 .eq("habit_id", habitId)
                 .maybeSingle();
 
@@ -93,8 +93,8 @@ export default function (app, supabase) {
             const counterSettings = counterSetRaw ? {
                 id: counterSetRaw.id,
                 min_count: Number(counterSetRaw.min_counter),
-                redCountRight: Number(counterSetRaw.redCounterRight),
-                redCountLeft: counterSetRaw.redCounterLeft !== null ? Number(counterSetRaw.redCounterLeft) : null
+                red_counter_right: counterSetRaw.red_counter_right !== null ? Number(counterSetRaw.red_counter_right) : null,
+                red_counter_left: counterSetRaw.red_counter_left !== null ? Number(counterSetRaw.red_counter_left) : null,
             } : null;
 
             const { data: privacy, error: privacyError } = await supabase
@@ -201,17 +201,16 @@ export default function (app, supabase) {
 
                 if (counterData) {
                     const progressionArray = counterData.progression || [];
-                    const lastProgress = progressionArray.length > 0 ? progressionArray[progressionArray.length - 1] : null;
 
                     counter = {
                         id: counterData.id,
                         started_at: new Date(counterData.created_at),
                         count: Number(counterData.count),
-                        progression: lastProgress ? {
-                            count: Number(lastProgress.count || 0),
-                            time: new Date(lastProgress.time),
-                            text: lastProgress.text || ""
-                        } : { count: 0, time: new Date(), text: "" },
+                        progression: progressionArray.map(p => ({
+                            count: Number(p.count || 0),
+                            time: new Date(p.time),
+                            text: p.text || ""
+                        })),
                         min_count: Number(counterData.min_count)
                     };
                 }
