@@ -100,6 +100,23 @@ export default function (app, supabase) {
       if (error) throw error;
     }
   };
+  app.get("/counter/:habit_id", authenticateUser(supabase), async (req, res) => {
+    const { id: user_id } = req.user;
+    const { habit_id } = req.params;
+
+    try {
+      const owner = await checkHabitOwner(habit_id, user_id);
+      if (!owner) return res.status(403).json({ success: false });
+
+      const counter = await getTodayCounter(habit_id);
+
+      res.json({ success: true, counter });
+
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ success: false });
+    }
+  });
 
   app.post("/counter/value", authenticateUser(supabase), async (req, res) => {
     const { id: user_id } = req.user;
@@ -173,7 +190,7 @@ export default function (app, supabase) {
         newProgression.push({
           count: delta,
           time: new Date().toISOString(),
-          text: "Сброс"
+          text: ""
         });
       }
 
@@ -263,6 +280,47 @@ export default function (app, supabase) {
           await checkAndUpdateCompletion(habit_id, user_id, old_state, new_state);
         }
       }
+
+      res.json({ success: true });
+
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ success: false });
+    }
+  });
+  app.post("/counter/text", authenticateUser(supabase), async (req, res) => {
+    const { id: user_id } = req.user;
+    const { habit_id, counter_id, time, text } = req.body;
+
+    if (!habit_id || !counter_id || !time) {
+      return res.status(400).json({ success: false });
+    }
+
+    try {
+      const owner = await checkHabitOwner(habit_id, user_id);
+      if (!owner) return res.status(403).json({ success: false });
+
+      const counter = await getTodayCounter(habit_id);
+      if (!counter) return res.status(404).json({ success: false });
+
+      const progression = counter.progression || [];
+
+      const newProgression = progression.map((p) => {
+        if (new Date(p.time).toISOString() === new Date(time).toISOString()) {
+          return {
+            ...p,
+            text: text || ""
+          };
+        }
+        return p;
+      });
+
+      const { error } = await supabase
+        .from("habit_counters")
+        .update({ progression: newProgression })
+        .eq("id", counter.id);
+
+      if (error) throw error;
 
       res.json({ success: true });
 

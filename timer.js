@@ -395,7 +395,7 @@ export default function(app, supabase) {
         const { id: userId } = req.user;
         const { habit_id: habitId, timer_id: timerId, time, text } = req.body;
 
-        if (!habitId || !timerId || !time || !text) {
+        if (!habitId || !timerId || !time) {
             return res.status(400).json({ success: false, error: "Не указаны необходимые параметры" });
         }
 
