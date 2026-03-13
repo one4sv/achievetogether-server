@@ -9,7 +9,7 @@ export default function (app, supabase) {
         if (!id) return res.status(401).json({ error: 'User not authenticated' });
 
         try {
-            if (['order', 'theme', 'show_archived', 'show_archived_in_acc', 'private', 'acsent', 'bg', 'decor', 'note', 'mess_note'].includes(setting)) {
+            if (['order', 'theme', 'show_archived', 'show_archived_in_acc', 'private', 'acsent', 'bg', 'decor', 'note', 'mess_note', "week_start"].includes(setting)) {
                 const { error } = await supabase
                     .from('settings')
                     .upsert({

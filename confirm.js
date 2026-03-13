@@ -41,10 +41,24 @@ export default function (app, supabase) {
           .eq("mail", pendingUser.mail)
           .single();
 
+        function getDefaultWeekStart() {
+          const today = new Date()
+          const year = today.getFullYear()
+
+          const sept1ThisYear = new Date(year, 8, 1) // 8 = сентябрь
+
+          if (today >= sept1ThisYear) {
+              return sept1ThisYear
+          }
+
+          return new Date(year - 1, 8, 1)
+        }
+
         // Настройки по умолчанию
         await supabase.from("settings").insert({
           user_id: newUser.id,
           order: ["everyday", "weekly", "sometimes"],
+          week_start:getDefaultWeekStart().toISOString().split("T")[0],
           private: {
             mail: "contacts",
             posts: "all",
