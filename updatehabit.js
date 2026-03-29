@@ -7,8 +7,6 @@ export default function (app, supabase) {
 
     app.post('/updatehabit', authenticateUser(supabase), async (req, res) => {
         const { habit_id, table, ...updateData } = req.body;
-        const field = Object.keys(updateData)[0];
-        const value = updateData[field];
         const { id: user_id } = req.user;
 
         if (!user_id) {
@@ -16,6 +14,9 @@ export default function (app, supabase) {
         }
         if (!habit_id) {
             return res.status(400).json({ error: 'ID привычки обязателен' });
+        }
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ error: 'Нет данных для обновления' });
         }
 
         try {
@@ -45,20 +46,25 @@ export default function (app, supabase) {
                 return res.status(400).json({ error: 'Недопустимая таблица' });
             }
 
-            if (!validFields.includes(field)) {
-                return res.status(400).json({ error: 'Недопустимое поле для обновления' });
+            // Проверяем все поля
+            for (const field of Object.keys(updateData)) {
+                if (!validFields.includes(field)) {
+                    return res.status(400).json({ error: `Недопустимое поле: ${field}` });
+                }
             }
 
-            let formattedValue = value;
-            if (field === 'start_date' || field === 'end_date') {
-                formattedValue = value ? new Date(value).toISOString().split('T')[0] : null;
+            let formattedUpdate = {};
+            for (const [field, value] of Object.entries(updateData)) {
+                let formattedValue = value;
+                if (field === 'start_date' || field === 'end_date') {
+                    formattedValue = value ? new Date(value).toISOString().split('T')[0] : null;
+                }
+                formattedUpdate[field] = formattedValue;
             }
 
             // === НОВАЯ ЛОГИКА: очистка chosen_days на backend ===
-            let updatePayload = { [field]: formattedValue };
-
-            if (table === 'habits' && field === 'periodicity' && formattedValue !== 'weekly') {
-                updatePayload.chosen_days = null;   // ← автоматический сброс
+            if (table === 'habits' && 'periodicity' in formattedUpdate && formattedUpdate.periodicity !== 'weekly') {
+                formattedUpdate.chosen_days = null;
             }
 
             let needId = habit_id;
@@ -81,12 +87,12 @@ export default function (app, supabase) {
 
             const { error } = await supabase
                 .from(table)
-                .update(updatePayload)   // ← обновляем одним запросом (возможно 2 поля)
+                .update(formattedUpdate)
                 .eq('id', needId);
 
             if (error) throw error;
 
-            console.log(`✅ Обновлено: ${field}${updatePayload.chosen_days !== undefined ? ' + chosen_days=null' : ''}`);
+            console.log(`✅ Обновлено (множественно): ${Object.keys(formattedUpdate).join(', ')}${formattedUpdate.chosen_days !== undefined ? ' + chosen_days=null' : ''}`);
             return res.status(200).json({ success: true });
         } catch (err) {
             console.error('Ошибка при обновлении привычки:', err);
