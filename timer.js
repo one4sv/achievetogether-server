@@ -150,6 +150,8 @@ export default function(app, supabase) {
                     .single();
 
                 if (insertError) {
+
+                    console.log(insertError)
                     throw insertError;
                 }
 

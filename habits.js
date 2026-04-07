@@ -159,8 +159,8 @@ export default function (app, supabase) {
                     .from("habit_timers")
                     .select("id, started_at, end_at, status, pauses, circles")
                     .eq("habit_id", habitId)
-                    .gte("end_at", startOfDay)
-                    .lt("end_at", endOfDay)
+                    .gte("started_at", startOfDay)
+                    .lt("started_at", endOfDay)
                     .order("started_at", { ascending: false })
                     .limit(1)
                     .maybeSingle();
