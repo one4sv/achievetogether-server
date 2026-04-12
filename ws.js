@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
-let clientsMap = new Map(); // userId -> Set(ws)
+let clientsMap = new Map();
 let supabaseGlobal;
 let broadcastUserStatus;
 
@@ -12,13 +12,11 @@ export async function broadcastNewMessage(chat_id, message) {
       .eq("id", senderId)
       .single();
 
-    // Получаем участников чата с их настройками уведомлений (note из chat_members)
     const { data: members } = await supabaseGlobal
       .from("chat_members")
       .select("user_id, note")
       .eq("chat_id", chat_id);
 
-    // Добавьте проверку: если members null/пусто, пропустите или залоггируйте
     if (!members || members.length === 0) {
       console.warn(`No members found for chat_id: ${chat_id}. Skipping broadcast.`);
       return;
@@ -28,27 +26,24 @@ export async function broadcastNewMessage(chat_id, message) {
       .from("chats")
       .select("name, is_group")
       .eq("id", chat_id)
-      .single();  // Добавьте .single() если ожидается одна запись, иначе вернёт массив
+      .single();
 
     if (!chat) {
       console.warn(`Chat not found for chat_id: ${chat_id}. Skipping broadcast.`);
       return;
     }
 
-    // Получаем глобальные настройки для всех участников
     const userIds = members.map(m => m.user_id);
     const { data: settingsList } = await supabaseGlobal
       .from("settings")
       .select("user_id, all_note, new_mess_note")
       .in("user_id", userIds);
 
-    // Создаем мапу userId => settings
     const settingsMap = new Map(settingsList?.map(s => [s.user_id, s]) || []);
 
     for (const member of members) {
       const userId = member.user_id;
       const userSettings = settingsMap.get(userId);
-      // Проверяем настройки (если настроек нет, считаем true по умолчанию)
       const allNote = userSettings?.all_note ?? true;
       const newMessNote = userSettings?.new_mess_note ?? true;
       const chatNote = member.note ?? true;  // Добавьте дефолт для chatNote
@@ -61,7 +56,7 @@ export async function broadcastNewMessage(chat_id, message) {
             s.send(JSON.stringify({
               type: "NEW_MESSAGE",
               chat_id: chat_id,
-              chat_name: chat?.name || undefined,  // ← Здесь исправление: optional chaining
+              chat_name: chat?.name || undefined,
               message,
               nick: senderData?.nick || null,
               username: senderData?.username || null,
@@ -145,7 +140,7 @@ export function broadcastKicked(payload) {
           type: "KICKED_FROM_GROUP",
           group_id,
           group_name,
-          reason // "kicked" или "left"
+          reason
         }));
       }
     });
@@ -213,6 +208,22 @@ export async function broadcastPinToggle(chat_id, message_id, is_pinned) {
     console.error("Ошибка в broadcastPinToggle:", err);
   }
 }
+export function broadcastTimerUpdate(userId, habitId, timerData) {
+  const sockets = clientsMap.get(userId);
+  if (!sockets) return;
+
+  const payload = JSON.stringify({
+    type: "TIMER_UPDATE",
+    habitId: Number(habitId),
+    timer: timerData
+  });
+
+  sockets.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
+  });
+}
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
   const wss = new WebSocketServer({ server, path: "/ws" });
@@ -227,7 +238,6 @@ export default function initWebSocket(supabase, server) {
     console.log(`🟢 WS connected: user ${userId}`);
     if (!clientsMap.has(userId)) clientsMap.set(userId, new Set());
     clientsMap.get(userId).add(ws);
-    // Обновляем last_online
     await supabase
       .from("users")
       .update({ last_online: new Date().toISOString() })
@@ -352,7 +362,6 @@ export default function initWebSocket(supabase, server) {
         nick = data.nick;
       }
     } else {
-      // Если онлайн — можно получить nick всё равно (для единообразия)
       const { data } = await supabaseGlobal
         .from("users")
         .select("nick")

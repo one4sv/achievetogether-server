@@ -198,4 +198,160 @@ export default function (app, supabase) {
             res.status(500).json({ success: false, error: "Ошибка сохранения" });
         }
     });
+
+    app.post("/schedule/complete", authenticateUser(supabase), async (req, res) => {
+        const { habit_id, blockId, date } = req.body;
+
+        if (!habit_id || !blockId || !date) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "habit_id, blockId и date обязательны" 
+            });
+        }
+
+        const habitIdNum = parseInt(habit_id, 10);
+        const blockIdNum = parseInt(blockId, 10);
+
+        if (isNaN(habitIdNum) || isNaN(blockIdNum)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "habit_id и blockId должны быть числами" 
+            });
+        }
+
+        const { data: settings } = await supabase
+            .from("habits_settings")
+            .select("auto_schedule_completion")
+            .eq("habit_id", habitIdNum)
+            .single();
+
+        try {
+            // 1. Проверяем права доступа к привычке
+            const { data: habit, error: habitError } = await supabase
+                .from("habits")
+                .select("id")
+                .eq("id", habitIdNum)
+                .eq("user_id", req.user.id)
+                .single();
+
+            if (habitError || !habit) {
+                return res.status(403).json({ 
+                    success: false, 
+                    error: "Нет доступа к привычке" 
+                });
+            }
+
+            // 2. Проверяем, что блок принадлежит этой привычке
+            const { data: block, error: blockError } = await supabase
+                .from("schedule")
+                .select("id")
+                .eq("id", blockIdNum)
+                .eq("habit_id", habitIdNum)
+                .single();
+
+            if (blockError || !block) {
+                return res.status(404).json({ 
+                    success: false, 
+                    error: "Блок расписания не найден или не принадлежит привычке" 
+                });
+            }
+
+            // 3. Проверяем, есть ли уже запись о завершении
+            const { data: existing } = await supabase
+                .from("schedule_completions")
+                .select("id")
+                .eq("habit_id", habitIdNum)
+                .eq("schedule_id", blockIdNum)
+                .eq("date", date)
+                .single();
+
+            let message = "";
+
+            if (existing) {
+                // === УДАЛЯЕМ ===
+                const { error: deleteError } = await supabase
+                    .from("schedule_completions")
+                    .delete()
+                    .eq("id", existing.id);
+
+                if (deleteError) throw deleteError;
+                message = "Завершение удалено (отмечено как невыполненное)";
+            } else {
+                // === ДОБАВЛЯЕМ ===
+                const { error: insertError } = await supabase
+                    .from("schedule_completions")
+                    .insert({
+                        habit_id: habitIdNum,
+                        schedule_id: blockIdNum,
+                        date: date
+                    });
+
+                if (insertError) throw insertError;
+                message = "Завершение сохранено";
+            }
+
+            res.json({ 
+                success: true, 
+                message,
+            });
+        } catch (err) {
+            console.error("Ошибка toggle завершения расписания:", err);
+            res.status(500).json({ 
+                success: false, 
+                error: "Ошибка сервера при обработке завершения" 
+            });
+        }
+    });
+
+    app.get("/schedule/complete/:id", authenticateUser(supabase), async (req, res) => {
+        const habitId = parseInt(req.params.id);
+        if (isNaN(habitId)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "Неверный ID привычки" 
+            });
+        }
+
+        try {
+            const { data: habit, error: habitError } = await supabase
+                .from("habits")
+                .select("id")
+                .eq("id", habitId)
+                .eq("user_id", req.user.id)
+                .single();
+
+            if (habitError || !habit) {
+                return res.status(403).json({ 
+                    success: false, 
+                    error: "Нет доступа к привычке" 
+                });
+            }
+
+            const { data: completions, error: completionsError } = await supabase
+                .from("schedule_completions")
+                .select(`
+                    id,
+                    habit_id,
+                    schedule_id,
+                    date,
+                    created_at
+                `)
+                .eq("habit_id", habitId)
+                .order("date", { ascending: true })
+                .order("created_at", { ascending: true });
+
+            if (completionsError) throw completionsError;
+
+            res.json({
+                success: true,
+                completions: completions || []
+            });
+        } catch (err) {
+            console.error("Ошибка получения завершений расписания:", err);
+            res.status(500).json({ 
+                success: false, 
+                error: "Ошибка сервера при получении завершений" 
+            });
+        }
+    });
 }
