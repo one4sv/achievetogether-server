@@ -20,7 +20,7 @@ export default function (app, supabase) {
       // Берём все привычки
       const { data: habits, error: errorHabit } = await supabase
         .from("habits")
-        .select("id, name, is_archived")
+        .select("id, name, ongoing")
         .eq("user_id", user_id);
 
       if (errorHabit) {
@@ -51,7 +51,7 @@ export default function (app, supabase) {
             comment,
             created_at: item.created_at,
             isDone: true,
-            is_archived: habit?.is_archived ?? false
+            ongoing: habit?.ongoing ?? true
           };
         }),
         ...(comments ?? [])
@@ -64,7 +64,7 @@ export default function (app, supabase) {
               date: c.date,
               comment: c.comment,
               isDone: false,
-              is_archived: habit?.is_archived ?? false
+              ongoing: habit?.ongoing ?? true
             };
           })
       ];
@@ -84,10 +84,9 @@ export default function (app, supabase) {
     }
 
     try {
-      // Берём привычку (с is_archived)
       const { data: habit, error: errorHabit } = await supabase
         .from("habits")
-        .select("id, name, is_archived")
+        .select("id, name, ongoing")
         .eq("id", habitId)
         .single();
 
@@ -129,7 +128,7 @@ export default function (app, supabase) {
           comment: comments.find(c => c.date === item.completed_at)?.comment ?? "",
           created_at: item.created_at,
           isDone: true,
-          is_archived: habit.is_archived
+          ongoing: habit.ongoing
         })),
         ...(comments ?? [])
           .filter(c => !(completions ?? []).some(comp => comp.completed_at === c.date))
@@ -139,7 +138,7 @@ export default function (app, supabase) {
             date: c.date,
             comment: c.comment,
             isDone: false,
-            is_archived: habit.is_archived
+            ongoing: habit.ongoing
           }))
       ];
 

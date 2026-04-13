@@ -41,7 +41,7 @@ export default function (app, supabase) {
         .eq("user_id", acc.id);
 
       if (!showArchived) {
-        habitsQuery = habitsQuery.eq("is_archived", false);
+        habitsQuery = habitsQuery.eq("ongoing", true);
       }
 
       const { data: habits, error: habitsError } = await habitsQuery;

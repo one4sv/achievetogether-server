@@ -110,7 +110,7 @@ export default function (app, supabase) {
 
             const showArchived = privacy?.show_archived_in_acc ?? false;
 
-            if (!showArchived && habit.is_archived && habit.user_id !== currentUserId) {
+            if (!showArchived && !habit.ongoing && habit.user_id !== currentUserId) {
                 return res.status(403).json({ success: false, error: "Пользователь скрыл активность" });
             }
 

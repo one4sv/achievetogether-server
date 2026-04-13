@@ -38,7 +38,7 @@ export default function (app, supabase) {
                 validFields = [
                     'name', 'desc', 'start_date', 'end_date', 'ongoing',
                     'periodicity', 'chosen_days', 'start_time', 'end_time',
-                    'pinned', 'tag', 'is_archived'
+                    'pinned', 'tag'
                 ];
             } else if (table === 'habits_settings') {
                 validFields = ['metric_type', 'schedule', 'auto_schedule_completion'];
