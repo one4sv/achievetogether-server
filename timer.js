@@ -252,7 +252,7 @@ export default function(app, supabase) {
 
             if (!fetchError && updatedTimer) {
                 broadcastTimerUpdate(userId, habitId, updatedTimer);
-                res.json({ success: true, timer: updatedTimer }); // возвращаем полный таймер
+                res.json({ success: true, timer: updatedTimer });
             } else {
                 res.json({ success: true });
             }
