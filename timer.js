@@ -217,7 +217,8 @@ export default function(app, supabase) {
                         .insert({
                             habit_id: habitId,
                             user_id: userId,
-                            completed_at: todayMoscow
+                            completed_at: todayMoscow,
+                            is_user_marked: false
                         })
                         .select("id")
                         .single();

@@ -10,6 +10,9 @@ export default function (app, supabase) {
                 .select("id")
                 .eq("user_id", user_id);
 
+            if (!habits) {
+                return res.json({ success:true, message:"nohabits" })
+            }
             const habitIds = habits.map(h => h.id);
 
             const { data: scheduleBlocks, error: scheduleError } = await supabase
@@ -317,7 +320,7 @@ app.post("/schedule/complete", authenticateUser(supabase), async (req, res) => {
         
         const diffDays = Math.floor((targetDate - weekStart) / (24 * 60 * 60 * 1000));
         const weekNumber = Math.floor(diffDays / 7);
-        const isEvenWeek = weekNumber % 2 === 0;
+        const isEvenWeek = weekNumber % 2 === 1;
 
         const dayOfWeek = targetDate.getDay(); // 0 = воскресенье
         
@@ -334,18 +337,37 @@ app.post("/schedule/complete", authenticateUser(supabase), async (req, res) => {
             .eq("date", date);
 
         const completedIds = new Set((completedBlocks || []).map(c => c.schedule_id));
+
+        if (!existing) {
+            completedIds.add(blockIdNum);
+        } else {
+            completedIds.delete(blockIdNum);
+        }
+
         const completedCount = activeBlocks.filter(b => completedIds.has(b.id)).length;
 
         const shouldComplete = 
             (asc === 'all' && activeBlocks.length > 0 && completedCount === activeBlocks.length) ||
             (asc === 'one' && completedCount >= 1);
 
-        const { data: habitCompletion } = await supabase
+        const { data: habitCompletion, error: hcError } = await supabase
             .from("habit_completions")
             .select("id, is_user_marked")
             .eq("habit_id", habitIdNum)
             .eq("completed_at", date)
-            .single();
+            .maybeSingle();
+
+        if (hcError) throw hcError;
+
+        console.log({
+            activeBlocks: activeBlocks.length,
+            completedCount,
+            asc,
+            shouldComplete,
+            activeIds: activeBlocks.map(b => b.id),
+            clicked: blockIdNum,
+            isEvenWeek,
+        });
 
         if (shouldComplete) {
             if (!habitCompletion) {
