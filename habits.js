@@ -37,10 +37,18 @@ export default function (app, supabase) {
         const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
 
         try {
+            // Получаем привычки + настройки
             const { data: habitsArr, error: habitsError } = await withRetry(() =>
                 supabase
                     .from("habits")
-                    .select("*")
+                    .select(`
+                        *,
+                        habits_settings (
+                            metric_type,
+                            schedule,
+                            auto_schedule_completion
+                        )
+                    `)
                     .eq("user_id", userId)
             );
 
@@ -53,7 +61,6 @@ export default function (app, supabase) {
                 return res.json({ success: true, habitsArr: [] });
             }
 
-            // Выполнения за сегодня
             const { data: completionsArr, error: completionsError } = await withRetry(() =>
                 supabase
                     .from("habit_completions")
@@ -69,15 +76,21 @@ export default function (app, supabase) {
 
             const doneSet = new Set(completionsArr?.map(c => c.habit_id) || []);
 
-            const habitsWithDone = habitsArr.map(habit => ({
-                ...habit,
-                done: doneSet.has(habit.id),
-            }));
+            const habitsWithDone = habitsArr.map(habit => {
+                const settings = habit.habits_settings?.[0] || null;
+
+                return {
+                    ...habit,
+                    settings,
+                    done: doneSet.has(habit.id),
+                };
+            });
 
             res.json({
                 success: true,
                 habitsArr: habitsWithDone,
             });
+
         } catch (err) {
             console.error("Ошибка запроса к Supabase (/habits):", err);
             if (!res.headersSent) {
@@ -85,13 +98,11 @@ export default function (app, supabase) {
             }
         }
     });
-
     app.get("/habits/:id", authenticateUser(supabase), async (req, res) => {
         const { id: currentUserId } = req.user;
         const { id: habitId } = req.params;
 
         try {
-            // Получаем привычку
             const { data: habit, error: habitError } = await withRetry(() =>
                 supabase
                     .from("habits")
@@ -118,7 +129,6 @@ export default function (app, supabase) {
                 return res.status(500).json({ success: false, error: "Ошибка получения настроек привычки" });
             }
 
-            // Настройки счётчика
             const { data: counterSetRaw, error: counterSetError } = await withRetry(() =>
                 supabase
                     .from("counter_settings")
