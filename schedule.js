@@ -202,201 +202,201 @@ export default function (app, supabase) {
         }
     });
 
-app.post("/schedule/complete", authenticateUser(supabase), async (req, res) => {
-    const { habit_id, blockId, date } = req.body;
+    app.post("/schedule/complete", authenticateUser(supabase), async (req, res) => {
+        const { habit_id, blockId, date } = req.body;
 
-    if (!habit_id || !blockId || !date) {
-        return res.status(400).json({ 
-            success: false, 
-            error: "habit_id, blockId и date обязательны" 
-        });
-    }
-
-    const habitIdNum = parseInt(habit_id, 10);
-    const blockIdNum = parseInt(blockId, 10);
-
-    if (isNaN(habitIdNum) || isNaN(blockIdNum)) {
-        return res.status(400).json({ 
-            success: false, 
-            error: "habit_id и blockId должны быть числами" 
-        });
-    }
-
-    let message = "";
-
-    try {
-        // 1. Проверяем права доступа к привычке
-        const { data: habit, error: habitError } = await supabase
-            .from("habits")
-            .select("id")
-            .eq("id", habitIdNum)
-            .eq("user_id", req.user.id)
-            .single();
-
-        if (habitError || !habit) {
-            return res.status(403).json({ 
+        if (!habit_id || !blockId || !date) {
+            return res.status(400).json({ 
                 success: false, 
-                error: "Нет доступа к привычке" 
+                error: "habit_id, blockId и date обязательны" 
             });
         }
 
-        // 2. Проверяем, что блок принадлежит этой привычке
-        const { data: block, error: blockError } = await supabase
-            .from("schedule")
-            .select("id")
-            .eq("id", blockIdNum)
-            .eq("habit_id", habitIdNum)
-            .single();
+        const habitIdNum = parseInt(habit_id, 10);
+        const blockIdNum = parseInt(blockId, 10);
 
-        if (blockError || !block) {
-            return res.status(404).json({ 
+        if (isNaN(habitIdNum) || isNaN(blockIdNum)) {
+            return res.status(400).json({ 
                 success: false, 
-                error: "Блок расписания не найден или не принадлежит привычке" 
+                error: "habit_id и blockId должны быть числами" 
             });
         }
 
-        // 3. Toggle записи в schedule_completions
-        const { data: existing } = await supabase
-            .from("schedule_completions")
-            .select("id")
-            .eq("habit_id", habitIdNum)
-            .eq("schedule_id", blockIdNum)
-            .eq("date", date)
-            .single();
+        let message = "";
 
-        if (existing) {
-            const { error: deleteError } = await supabase
-                .from("schedule_completions")
-                .delete()
-                .eq("id", existing.id);
-            if (deleteError) throw deleteError;
-            message = "Завершение блока удалено";
-        } else {
-            const { error: insertError } = await supabase
-                .from("schedule_completions")
-                .insert({
-                    habit_id: habitIdNum,
-                    schedule_id: blockIdNum,
-                    date: date
-                });
-            if (insertError) throw insertError;
-            message = "Завершение блока сохранено";
-        }
-        
-        // === АВТО-ЗАВЕРШЕНИЕ ПРИВЫЧКИ ===
-        const { data: habits_settings } = await supabase
-            .from("habits_settings")
-            .select("auto_schedule_completion")
-            .eq("habit_id", habitIdNum)
-            .single();
+        try {
+            // 1. Проверяем права доступа к привычке
+            const { data: habit, error: habitError } = await supabase
+                .from("habits")
+                .select("id")
+                .eq("id", habitIdNum)
+                .eq("user_id", req.user.id)
+                .single();
 
-        const asc = habits_settings?.auto_schedule_completion || "none";
-
-        if (asc === "none") {
-            return res.json({ success: true, message });
-        }
-
-        const { data: schedule_settings } = await supabase
-            .from("schedule_settings")
-            .select("isSeparated")
-            .eq("habit_id", habitIdNum)
-            .single();
-
-        const { data: schedule } = await supabase
-            .from("schedule")
-            .select("id, day_of_week, isSeparator")
-            .eq("habit_id", habitIdNum);
-
-        const { data: week_start } = await supabase
-            .from("settings")
-            .select("week_start")
-            .eq("user_id", req.user.id)
-            .single();
-
-        const weekStart = new Date(week_start?.week_start || '2025-09-01');
-        const targetDate = new Date(date);
-        weekStart.setHours(0, 0, 0, 0);
-        targetDate.setHours(0, 0, 0, 0);
-        
-        const diffDays = Math.floor((targetDate - weekStart) / (24 * 60 * 60 * 1000));
-        const weekNumber = Math.floor(diffDays / 7);
-        const isEvenWeek = weekNumber % 2 === 1;
-
-        const dayOfWeek = targetDate.getDay(); // 0 = воскресенье
-        
-        const activeBlocks = (schedule || []).filter(b => {
-            if (b.day_of_week !== dayOfWeek) return false;
-            if (!schedule_settings?.isSeparated) return true;
-            return b.isSeparator === isEvenWeek;
-        });
-
-        const { data: completedBlocks } = await supabase
-            .from("schedule_completions")
-            .select("schedule_id")
-            .eq("habit_id", habitIdNum)
-            .eq("date", date);
-
-        const completedIds = new Set((completedBlocks || []).map(c => c.schedule_id));
-
-        if (!existing) {
-            completedIds.add(blockIdNum);
-        } else {
-            completedIds.delete(blockIdNum);
-        }
-
-        const completedCount = activeBlocks.filter(b => completedIds.has(b.id)).length;
-
-        const shouldComplete = 
-            (asc === 'all' && activeBlocks.length > 0 && completedCount === activeBlocks.length) ||
-            (asc === 'one' && completedCount >= 1);
-
-        const { data: habitCompletion, error: hcError } = await supabase
-            .from("habit_completions")
-            .select("id, is_user_marked")
-            .eq("habit_id", habitIdNum)
-            .eq("completed_at", date)
-            .maybeSingle();
-
-        if (hcError) throw hcError;
-
-        console.log({
-            activeBlocks: activeBlocks.length,
-            completedCount,
-            asc,
-            shouldComplete,
-            activeIds: activeBlocks.map(b => b.id),
-            clicked: blockIdNum,
-            isEvenWeek,
-        });
-
-        if (shouldComplete) {
-            if (!habitCompletion) {
-                await supabase.from("habit_completions").insert({
-                    habit_id: habitIdNum,
-                    completed_at: date,
-                    user_id: req.user.id,
-                    is_user_marked: false  // авто-создание
+            if (habitError || !habit) {
+                return res.status(403).json({ 
+                    success: false, 
+                    error: "Нет доступа к привычке" 
                 });
             }
-        } else {
-            if (habitCompletion && !habitCompletion.is_user_marked) {
-                await supabase
-                    .from("habit_completions")
+
+            // 2. Проверяем, что блок принадлежит этой привычке
+            const { data: block, error: blockError } = await supabase
+                .from("schedule")
+                .select("id")
+                .eq("id", blockIdNum)
+                .eq("habit_id", habitIdNum)
+                .single();
+
+            if (blockError || !block) {
+                return res.status(404).json({ 
+                    success: false, 
+                    error: "Блок расписания не найден или не принадлежит привычке" 
+                });
+            }
+
+            // 3. Toggle записи в schedule_completions
+            const { data: existing } = await supabase
+                .from("schedule_completions")
+                .select("id")
+                .eq("habit_id", habitIdNum)
+                .eq("schedule_id", blockIdNum)
+                .eq("date", date)
+                .single();
+
+            if (existing) {
+                const { error: deleteError } = await supabase
+                    .from("schedule_completions")
                     .delete()
-                    .eq("id", habitCompletion.id);
+                    .eq("id", existing.id);
+                if (deleteError) throw deleteError;
+                message = "Завершение блока удалено";
+            } else {
+                const { error: insertError } = await supabase
+                    .from("schedule_completions")
+                    .insert({
+                        habit_id: habitIdNum,
+                        schedule_id: blockIdNum,
+                        date: date
+                    });
+                if (insertError) throw insertError;
+                message = "Завершение блока сохранено";
             }
+            
+            // === АВТО-ЗАВЕРШЕНИЕ ПРИВЫЧКИ ===
+            const { data: habits_settings } = await supabase
+                .from("habits_settings")
+                .select("auto_schedule_completion")
+                .eq("habit_id", habitIdNum)
+                .single();
+
+            const asc = habits_settings?.auto_schedule_completion || "none";
+
+            if (asc === "none") {
+                return res.json({ success: true, message });
+            }
+
+            const { data: schedule_settings } = await supabase
+                .from("schedule_settings")
+                .select("isSeparated")
+                .eq("habit_id", habitIdNum)
+                .single();
+
+            const { data: schedule } = await supabase
+                .from("schedule")
+                .select("id, day_of_week, isSeparator")
+                .eq("habit_id", habitIdNum);
+
+            const { data: week_start } = await supabase
+                .from("settings")
+                .select("week_start")
+                .eq("user_id", req.user.id)
+                .single();
+
+            const weekStart = new Date(week_start?.week_start || '2025-09-01');
+            const targetDate = new Date(date);
+            weekStart.setHours(0, 0, 0, 0);
+            targetDate.setHours(0, 0, 0, 0);
+            
+            const diffDays = Math.floor((targetDate - weekStart) / (24 * 60 * 60 * 1000));
+            const weekNumber = Math.floor(diffDays / 7);
+            const isEvenWeek = weekNumber % 2 === 1;
+
+            const dayOfWeek = targetDate.getDay(); // 0 = воскресенье
+            
+            const activeBlocks = (schedule || []).filter(b => {
+                if (b.day_of_week !== dayOfWeek) return false;
+                if (!schedule_settings?.isSeparated) return true;
+                return b.isSeparator === isEvenWeek;
+            });
+
+            const { data: completedBlocks } = await supabase
+                .from("schedule_completions")
+                .select("schedule_id")
+                .eq("habit_id", habitIdNum)
+                .eq("date", date);
+
+            const completedIds = new Set((completedBlocks || []).map(c => c.schedule_id));
+
+            if (!existing) {
+                completedIds.add(blockIdNum);
+            } else {
+                completedIds.delete(blockIdNum);
+            }
+
+            const completedCount = activeBlocks.filter(b => completedIds.has(b.id)).length;
+
+            const shouldComplete = 
+                (asc === 'all' && activeBlocks.length > 0 && completedCount === activeBlocks.length) ||
+                (asc === 'one' && completedCount >= 1);
+
+            const { data: habitCompletion, error: hcError } = await supabase
+                .from("habit_completions")
+                .select("id, is_user_marked")
+                .eq("habit_id", habitIdNum)
+                .eq("completed_at", date)
+                .maybeSingle();
+
+            if (hcError) throw hcError;
+
+            console.log({
+                activeBlocks: activeBlocks.length,
+                completedCount,
+                asc,
+                shouldComplete,
+                activeIds: activeBlocks.map(b => b.id),
+                clicked: blockIdNum,
+                isEvenWeek,
+            });
+
+            if (shouldComplete) {
+                if (!habitCompletion) {
+                    await supabase.from("habit_completions").insert({
+                        habit_id: habitIdNum,
+                        completed_at: date,
+                        user_id: req.user.id,
+                        is_user_marked: false  // авто-создание
+                    });
+                }
+            } else {
+                if (habitCompletion && !habitCompletion.is_user_marked) {
+                    await supabase
+                        .from("habit_completions")
+                        .delete()
+                        .eq("id", habitCompletion.id);
+                }
+            }
+
+            res.json({ success: true, message });
+
+        } catch (err) {
+            console.error("Ошибка toggle завершения расписания:", err);
+            res.status(500).json({ 
+                success: false, 
+                error: "Ошибка сервера при обработке завершения" 
+            });
         }
-
-        res.json({ success: true, message });
-
-    } catch (err) {
-        console.error("Ошибка toggle завершения расписания:", err);
-        res.status(500).json({ 
-            success: false, 
-            error: "Ошибка сервера при обработке завершения" 
-        });
-    }
-});
+    });
 
     app.get("/schedule/complete/:id", authenticateUser(supabase), async (req, res) => {
         const habitId = parseInt(req.params.id);

@@ -43,6 +43,7 @@ import editpermissionsRoutes from "./editpermissions.js";
 import timerRoutes from "./timer.js";
 import counterRoutes from "./counter.js";
 import scheduleRoutes from "./schedule.js";
+import checklistRoutes from "./checklist.js";
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -112,6 +113,7 @@ editpermissionsRoutes(app, supabase);
 timerRoutes(app, supabase);
 counterRoutes(app, supabase);
 scheduleRoutes(app, supabase)
+checklistRoutes(app, supabase)
 logoutRoutes(app);
 
 const server = createServer(app);

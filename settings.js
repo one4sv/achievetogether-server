@@ -1,8 +1,8 @@
 import { authenticateUser } from "./middleware/token.js";
 
-// ==================== ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ С RETRY ====================
 const withRetry = async (operation, maxRetries = 4) => {
     let lastError;
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
             return await operation();
@@ -17,22 +17,28 @@ const withRetry = async (operation, maxRetries = 4) => {
                 err.code === "ENOTFOUND";
 
             if (!isNetworkError || attempt === maxRetries) {
-                console.error(`❌ Supabase запрос окончательно провалился после ${attempt + 1} попыток:`, err);
+                console.error(`❌ Supabase запрос провалился:`, err);
                 throw err;
             }
 
             const delay = Math.min(800 * Math.pow(2, attempt), 8000);
-            console.warn(`⚠️ [RETRY] Supabase (${attempt + 1}/${maxRetries + 1}) — повтор через ${delay}мс: ${err.message}`);
             await new Promise(r => setTimeout(r, delay));
         }
     }
+
     throw lastError;
 };
-// ========================================================================
 
 export default function (app, supabase) {
     app.get("/settings", authenticateUser(supabase), async (req, res) => {
-        const { id } = req.user;
+        const id = req.user?.id;
+
+        if (!id) {
+            return res.status(401).json({
+                success: false,
+                error: "Не авторизован"
+            });
+        }
 
         try {
             const { data, error } = await withRetry(() =>
@@ -40,13 +46,14 @@ export default function (app, supabase) {
                     .from("settings")
                     .select("*")
                     .eq("user_id", id)
-                    .limit(1)
                     .maybeSingle()
             );
 
             if (error || !data) {
-                console.error("Ошибка получения настроек:", error);
-                return res.status(404).json({ success: false, error: "Настройки не найдены" });
+                return res.status(404).json({
+                    success: false,
+                    error: "Настройки не найдены"
+                });
             }
 
             res.json({
@@ -65,6 +72,7 @@ export default function (app, supabase) {
                 show_archived_in_acc: data.show_archived_in_acc,
                 week_start: data.week_start
             });
+
         } catch (err) {
             console.error("Ошибка запроса к Supabase (/settings):", err);
             if (!res.headersSent) {

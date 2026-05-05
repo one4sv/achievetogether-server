@@ -1,43 +1,16 @@
 import { authenticateUser } from "./middleware/token.js";
-
-// ==================== ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ С RETRY ====================
-const withRetry = async (operation, maxRetries = 4) => {
-    let lastError;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            return await operation();
-        } catch (err) {
-            lastError = err;
-
-            // Определяем, что это именно сетевая ошибка undici/fetch
-            const isNetworkError =
-                err.message?.includes("fetch failed") ||
-                err.cause?.message?.includes("fetch") ||
-                err.name === "TypeError" ||
-                err.code === "ECONNRESET" ||
-                err.code === "ENOTFOUND";
-
-            if (!isNetworkError || attempt === maxRetries) {
-                console.error(`❌ Supabase запрос окончательно провалился после ${attempt + 1} попыток:`, err);
-                throw err;
-            }
-
-            const delay = Math.min(800 * Math.pow(2, attempt), 8000);
-            console.warn(`⚠️ [RETRY] Supabase (${attempt + 1}/${maxRetries + 1}) — повтор через ${delay}мс: ${err.message}`);
-            await new Promise(r => setTimeout(r, delay));
-        }
-    }
-    throw lastError;
-};
-// ========================================================================
+import { withRetry } from "./funcs/withRetry.js";
 
 export default function (app, supabase) {
     app.get("/habits", authenticateUser(supabase), async (req, res) => {
-        const { id: userId } = req.user;
+        const userId = req.user?.id;
         const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
 
+        if (!userId) {
+            return res.json({ success: true, habitsArr: [] });
+        }
+
         try {
-            // Получаем привычки + настройки
             const { data: habitsArr, error: habitsError } = await withRetry(() =>
                 supabase
                     .from("habits")
@@ -98,8 +71,9 @@ export default function (app, supabase) {
             }
         }
     });
+
     app.get("/habits/:id", authenticateUser(supabase), async (req, res) => {
-        const { id: currentUserId } = req.user;
+        const currentUserId = req.user?.id || null;
         const { id: habitId } = req.params;
 
         try {
@@ -172,45 +146,49 @@ export default function (app, supabase) {
             const startOfDay = new Date(`${today}T00:00:00+03:00`).toISOString();
             const endOfDay = new Date(new Date(startOfDay).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-            // Выполнение за сегодня
-            const { data: completion, error: completionError } = await withRetry(() =>
-                supabase
-                    .from("habit_completions")
-                    .select("id")
-                    .eq("habit_id", habitId)
-                    .eq("user_id", currentUserId)
-                    .eq("completed_at", today)
-                    .maybeSingle()
-            );
+            let isDone = false;
+            let comment = "";
 
-            if (completionError) {
-                console.error(completionError);
-                return res.status(500).json({ success: false, error: "Ошибка проверки выполнения" });
+            if (currentUserId) {
+                const { data: completion, error: completionError } = await withRetry(() =>
+                    supabase
+                        .from("habit_completions")
+                        .select("id")
+                        .eq("habit_id", habitId)
+                        .eq("user_id", currentUserId)
+                        .eq("completed_at", today)
+                        .maybeSingle()
+                );
+
+                if (completionError) {
+                    console.error(completionError);
+                    return res.status(500).json({ success: false, error: "Ошибка проверки выполнения" });
+                }
+
+                isDone = !!completion;
+
+                const { data: commentData, error: commentError } = await withRetry(() =>
+                    supabase
+                        .from("completions_comments")
+                        .select("comment")
+                        .eq("habit_id", habitId)
+                        .eq("user_id", currentUserId)
+                        .eq("date", today)
+                        .maybeSingle()
+                );
+
+                if (commentError) {
+                    console.error(commentError);
+                    return res.status(500).json({ success: false, error: "Ошибка получения комментария" });
+                }
+
+                comment = commentData?.comment || "";
             }
 
-            const isDone = !!completion;
             const isRead = habit.user_id !== currentUserId;
 
-            // Комментарий за сегодня
-            const { data: commentData, error: commentError } = await withRetry(() =>
-                supabase
-                    .from("completions_comments")
-                    .select("comment")
-                    .eq("habit_id", habitId)
-                    .eq("user_id", currentUserId)
-                    .eq("date", today)
-                    .maybeSingle()
-            );
-
-            if (commentError) {
-                console.error(commentError);
-                return res.status(500).json({ success: false, error: "Ошибка получения комментария" });
-            }
-
-            const comment = commentData?.comment || "";
-
             let timer = null;
-            if (!isRead) {
+            // if (!isRead) {
                 const { data: timerData, error: timerError } = await withRetry(() =>
                     supabase
                         .from("habit_timers")
@@ -238,10 +216,10 @@ export default function (app, supabase) {
                         circles: timerData.circles || []
                     };
                 }
-            }
+            // }
 
             let counter = null;
-            if (!isRead) {
+            // if (!isRead) {
                 const { data: counterData, error: counterError } = await withRetry(() =>
                     supabase
                         .from("habit_counters")
@@ -273,7 +251,24 @@ export default function (app, supabase) {
                         min_count: Number(counterData.min_count)
                     };
                 }
-            }
+            // }
+            let checklist = [];
+
+            // if (currentUserId) {
+                const { data: completions, error: complError } = await withRetry(() =>
+                    supabase
+                        .from("checklist_completions")
+                        .select("id, name, start_time, end_time, date, habit_id")
+                        .eq("habit_id", habitId)
+                        .order("start_time", { ascending: true })
+                );
+
+                if (complError) {
+                    console.error("Ошибка загрузки checklist:", complError);
+                } else {
+                    checklist = completions || [];
+                }
+            // }
 
             res.json({
                 success: true,
@@ -284,8 +279,10 @@ export default function (app, supabase) {
                 settings,
                 timer,
                 counter,
-                counterSettings
+                counterSettings,
+                checklist
             });
+
         } catch (err) {
             console.error("Ошибка запроса к Supabase (/habits/:id):", err);
             if (!res.headersSent) {
