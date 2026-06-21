@@ -322,12 +322,12 @@ export default function (app, supabase) {
             const weekNumber = Math.floor(diffDays / 7);
             const isEvenWeek = weekNumber % 2 === 1;
 
-            const dayOfWeek = targetDate.getDay(); // 0 = воскресенье
+            const dayOfWeek = targetDate.getDay();
             
             const activeBlocks = (schedule || []).filter(b => {
                 if (b.day_of_week !== dayOfWeek) return false;
                 if (!schedule_settings?.isSeparated) return true;
-                return b.isSeparator === isEvenWeek;
+                return b.isSeparator === !isEvenWeek;
             });
 
             const { data: completedBlocks } = await supabase
