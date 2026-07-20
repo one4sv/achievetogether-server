@@ -39,31 +39,84 @@ export default function (app, supabase) {
         return res.status(500).json({ success: false, error: "Ошибка при получении комментариев" });
       }
 
+      const { data: planned, error: errorPlanned } = await supabase
+        .from("habit_planned")
+        .select("habit_id, planned_at")
+        .in("habit_id", (habits ?? []).map(h => h.id));
+
+      if (errorPlanned) {
+        console.log(errorPlanned);
+        return res.status(500).json({
+          success: false,
+          error: "Ошибка при получении запланированных дней"
+        });
+      }
+
       // Собираем календарь
       const mapped = [
         ...(completions ?? []).map(item => {
           const habit = habits.find(h => h.id === item.habit_id);
-          const comment = comments.find(c => c.habit_id === item.habit_id && c.date === item.completed_at)?.comment ?? "";
+          const comment = comments.find(
+            c => c.habit_id === item.habit_id && c.date === item.completed_at
+          )?.comment ?? "";
+
           return {
             habitId: String(item.habit_id),
-            habitName: habit ? habit.name : "Неизвестная привычка",
+            habitName: habit?.name ?? "Неизвестная привычка",
             date: item.completed_at,
             comment,
             created_at: item.created_at,
             isDone: true,
+            isPlanned: false,
             ongoing: habit?.ongoing ?? true
           };
         }),
+
         ...(comments ?? [])
-          .filter(c => !completions.some(comp => comp.habit_id === c.habit_id && comp.completed_at === c.date))
+          .filter(c =>
+            !(completions ?? []).some(
+              comp =>
+                comp.habit_id === c.habit_id &&
+                comp.completed_at === c.date
+            )
+          )
           .map(c => {
             const habit = habits.find(h => h.id === c.habit_id);
+
             return {
               habitId: String(c.habit_id),
-              habitName: habit ? habit.name : "Неизвестная привычка",
+              habitName: habit?.name ?? "Неизвестная привычка",
               date: c.date,
               comment: c.comment,
               isDone: false,
+              isPlanned: false,
+              ongoing: habit?.ongoing ?? true
+            };
+          }),
+
+        ...(planned ?? [])
+          .filter(p =>
+            !(completions ?? []).some(
+              c =>
+                c.habit_id === p.habit_id &&
+                c.completed_at === p.planned_at
+            ) &&
+            !(comments ?? []).some(
+              c =>
+                c.habit_id === p.habit_id &&
+                c.date === p.planned_at
+            )
+          )
+          .map(p => {
+            const habit = habits.find(h => h.id === p.habit_id);
+
+            return {
+              habitId: String(p.habit_id),
+              habitName: habit?.name ?? "Неизвестная привычка",
+              date: p.planned_at,
+              comment: "",
+              isDone: false,
+              isPlanned: true,
               ongoing: habit?.ongoing ?? true
             };
           })
@@ -119,7 +172,19 @@ export default function (app, supabase) {
         return res.status(500).json({ success: false, error: "Ошибка при получении комментариев" });
       }
 
-      // Календарь для одной привычки
+      const { data: planned, error: plannedError } = await supabase
+        .from("habit_planned")
+        .select("planned_at")
+        .eq("habit_id", habitId);
+
+      if (plannedError) {
+        console.log(plannedError);
+        return res.status(500).json({
+          success: false,
+          error: "Ошибка при получении планов"
+        });
+      }
+
       const mapped = [
         ...(completions ?? []).map(item => ({
           habitId: String(habit.id),
@@ -128,16 +193,42 @@ export default function (app, supabase) {
           comment: comments.find(c => c.date === item.completed_at)?.comment ?? "",
           created_at: item.created_at,
           isDone: true,
+          isPlanned: false,
           ongoing: habit.ongoing
         })),
+
         ...(comments ?? [])
-          .filter(c => !(completions ?? []).some(comp => comp.completed_at === c.date))
+          .filter(c =>
+            !(completions ?? []).some(
+              comp => comp.completed_at === c.date
+            )
+          )
           .map(c => ({
             habitId: String(habit.id),
             habitName: habit.name,
             date: c.date,
             comment: c.comment,
             isDone: false,
+            isPlanned: false,
+            ongoing: habit.ongoing
+          })),
+
+        ...(planned ?? [])
+          .filter(p =>
+            !(completions ?? []).some(
+              comp => comp.completed_at === p.planned_at
+            ) &&
+            !(comments ?? []).some(
+              c => c.date === p.planned_at
+            )
+          )
+          .map(p => ({
+            habitId: String(habit.id),
+            habitName: habit.name,
+            date: p.planned_at,
+            comment: "",
+            isDone: false,
+            isPlanned: true,
             ongoing: habit.ongoing
           }))
       ];
