@@ -59,11 +59,7 @@ export default function (app, supabase) {
             res.json({
                 success: true,
                 order: data.order,
-                theme: data.theme,
                 private: data.private,
-                acsent: data.acsent,
-                bg: data.bg,
-                decor: data.decor,
                 bg_url: data.bg_url,
                 twoAuth: data.two_auth,
                 all_note: data.all_note,
