@@ -5,6 +5,31 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export default function(app, supabase) {
+    const checkDuplicates = async (table, nick, mail) => {
+        if (nick) {
+            const { data, error } = await supabase
+                .from(table)
+                .select("id")
+                .eq("nick", nick)
+                .limit(1);
+
+            if (error) throw error;
+            if (data.length) return { field: "nick" };
+        }
+
+        if (mail) {
+            const { data, error } = await supabase
+                .from(table)
+                .select("id")
+                .eq("mail", mail)
+                .limit(1);
+
+            if (error) throw error;
+            if (data.length) return { field: "mail" };
+        }
+
+        return null;
+    };
     app.get('/register', (req, res) => {
         res.send("Принимаем...");
     });
@@ -18,27 +43,7 @@ export default function(app, supabase) {
         }
 
         try {
-            const checkDuplicates = async (table) => {
-                const { data: byNick, error: errNick } = await supabase
-                    .from(table)
-                    .select("nick")
-                    .eq("nick", nick)
-                    .limit(1);
-                if (errNick) throw errNick;
-                if (byNick?.length > 0) return { field: "nick" };
-
-                const { data: byMail, error: errMail } = await supabase
-                    .from(table)
-                    .select("mail")
-                    .eq("mail", mail)
-                    .limit(1);
-                if (errMail) throw errMail;
-                if (byMail?.length > 0) return { field: "mail" };
-
-                return null;
-            };
-
-            const dupeInUsers = await checkDuplicates("users");
+            const dupeInUsers = await checkDuplicates("users", nick, mail);
             if (dupeInUsers) {
                 return res.status(409).json({
                     success: false,
@@ -48,7 +53,7 @@ export default function(app, supabase) {
                 });
             }
 
-            const dupeInPending = await checkDuplicates("pending_users");
+            const dupeInPending = await checkDuplicates("pending_users", nick, mail);
             if (dupeInPending) {
                 return res.status(409).json({
                     success: false,
@@ -86,6 +91,33 @@ export default function(app, supabase) {
         } catch (err) {
             console.error("Registration error:", err);
             res.status(500).json({ success: false, error: err.message || "Ошибка регистрации" });
+        }
+    });
+    app.post("/register/check", async (req, res) => {
+        const { nick, mail } = req.body;
+
+        try {
+            let result = await checkDuplicates("users", nick, mail);
+            if (!result) {
+                result = await checkDuplicates("pending_users", nick, mail);
+            }
+
+            if (result) {
+                return res.json({
+                    success: false,
+                    field: result.field,
+                });
+            }
+
+            res.json({
+                success: true,
+            });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({
+                success: false,
+                error: err.message,
+            });
         }
     });
 }
