@@ -43,6 +43,8 @@ export async function sendMail(to, subject, html) {
     });
     console.log("✅ Email sent to", to);
   } catch (err) {
-    console.error("❌ Gmail API error:", err);
+    console.error(
+      err.response?.data || err.message || err
+    );
   }
 }

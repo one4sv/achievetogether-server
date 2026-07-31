@@ -2,6 +2,8 @@ import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
 import { sendMail } from "./sendmail.js"; // твой модуль с API
 import dotenv from "dotenv";
+import { getMailTemplate } from "./funcs/mailTamlate.js";
+
 dotenv.config();
 
 export default function(app, supabase) {
@@ -64,27 +66,32 @@ export default function(app, supabase) {
             }
 
             const hashedPassword = await bcrypt.hash(pass, 10);
-            const token = randomUUID();
+            const code = Math.floor(
+                100000 + Math.random() * 900000
+            ).toString();
             const created_at = new Date().toISOString();
             const expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
             const { error: insertError } = await supabase
                 .from("pending_users")
-                .insert([{ nick, mail, pass: hashedPassword, token, created_at, expires_at }]);
+                .insert([{ nick, mail, pass: hashedPassword, code, created_at, expires_at }]);
 
             if (insertError) {
                 console.error("Ошибка добавления в PendingUsers:", insertError);
                 return res.status(500).json({ success: false, error: "Ошибка регистрации" });
             }
-            const link = `${process.env.CLIENT_URL}/confirm?token=${token}`;
-            const html = `
-                <h2>Привет, ${nick}!</h2>
-                <p>Для завершения регистрации нажми на ссылку ниже:</p>
-                <a href="${link}">Подтвердить аккаунт</a>
-                <p>Если это были не вы — просто проигнорируйте это письмо.</p>
-            `;
+            const mailHtml = getMailTemplate({
+                code,
+                title: "Подтвердите регистрацию",
+                subtitle: `Здравствуйте, ${nick}!`,
+                expireText: "Код действителен 24 часа"
+            });
 
-            await sendMail(mail, "Подтверждение регистрации", html);
+            await sendMail(
+                mail,
+                "Подтверждение регистрации",
+                mailHtml
+            );
 
             res.status(200).json({ success: true, message: "Письмо с подтверждением отправлено" });
 

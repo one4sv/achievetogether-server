@@ -3,14 +3,14 @@ import { randomUUID } from "crypto";
 import { sendMail } from "./sendmail.js"; // твой модуль с API
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
-
+import { getMailTemplate } from "./funcs/mailTamlate.js";
 dotenv.config();
 
 const SECRET = process.env.JWT_SECRET;
 
 export default function(app, supabase) {
   app.post("/auth", async (req, res) => {
-    const { login, pass } = req.body;
+    const { login, pass, isRemember } = req.body;
     if (!login || !pass) {
       return res.status(400).json({ success: false, error: "Все поля обязательны" });
     }
@@ -46,29 +46,32 @@ export default function(app, supabase) {
 
       // 4️⃣ Если 2FA включена — создаём токен и отправляем письмо
       if (settings.two_auth) {
-        const token = randomUUID();
+        const code = Math.floor(
+          100000 + Math.random() * 900000
+        ).toString();
         const createdAt = new Date().toISOString(); // Добавлено: created_at в UTC для timestamptz
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 минут
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 10 минут
 
         const { error: insertTokenError } = await supabase
           .from("auth_tokens")
-          .insert([{ mail: user.mail, token, created_at: createdAt, expires_at: expiresAt }]); // Добавлено created_at
+          .insert([{ mail: user.mail, code, created_at: createdAt, expires_at: expiresAt }]); // Добавлено created_at
 
         if (insertTokenError) {
           console.error("Ошибка сохранения токена:", insertTokenError);
           return res.status(500).json({ success: false, error: "Ошибка сервера" });
         }
 
-      const link = `${process.env.CLIENT_URL}/confirm?token=${token}`;
-      const mailHtml = `
-        <h2>Привет, ${user.nick}!</h2>
-        <p>Для завершения авторизации нажми на ссылку ниже:</p>
-        <a href="${link}">Подтвердить авторизацию</a>
-        <p>Если авторизовывались не вы — смените пароль.</p>
-      `;
+      const mailHtml = getMailTemplate({
+          code,
+          title: "Подтвердите вход в аккаунт",
+          subtitle: `Здравствуйте, ${user.nick}!`
+      });
 
-      // Отправка через SendGrid
-      await sendMail(user.mail, "Подтверждение авторизации", mailHtml);
+      await sendMail(
+          user.mail,
+          "Подтверждение входа",
+          mailHtml
+      );
 
         return res.status(200).json({
           success: true,
@@ -79,7 +82,20 @@ export default function(app, supabase) {
 
       // 5️⃣ Если 2FA выключена — создаём JWT и авторизуем сразу
       const jwtToken = jwt.sign({ id: user.id }, SECRET, { expiresIn: "30d" });
-      res.cookie("token", jwtToken, { httpOnly: true, secure: true, sameSite: "none", maxAge: 30 * 24 * 60 * 60 * 1000 });
+      if (isRemember) {
+        res.cookie("token", jwtToken, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "none",
+          maxAge: 30 * 24 * 60 * 60 * 1000
+        });
+      } else {
+        res.cookie("token", jwtToken, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "none"
+        });
+      }
 
       return res.status(200).json({
         success: true,
