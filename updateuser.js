@@ -10,7 +10,7 @@ export default function(app, supabase) {
     }
 
     // whitelist of updatable columns
-    const allowed = new Set(["username", "nick", "bio", "mail" /* avatar_url handled by /uploadavatar */ ]);
+    const allowed = new Set(["username", "nick", "bio", "mail", "date_of_birth" /* avatar_url handled by /uploadavatar */ ]);
 
     const updateObj = {};
     for (const item of payload) {
