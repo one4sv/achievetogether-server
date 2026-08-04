@@ -33,6 +33,9 @@ export default function(app, supabase) {
                 bio: data.bio,
                 avatar_url: data.avatar_url,
                 last_online: data.last_online,
+                reg_date:data.registration_date,
+                date_of_birth:data.date_of_birth,
+                sex:data.sex,
                 id
             });
 

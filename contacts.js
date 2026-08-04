@@ -17,7 +17,7 @@ export default function (app, supabase) {
         ? chat_members.map(c => c.chat_id)
         : [];
 
-      if (chatIds.length === 0) {
+      if (chatIds.length === 0 && !search?.trim()) {
         return res.json({ success: true, friendsArr: [] });
       }
 
