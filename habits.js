@@ -27,6 +27,7 @@ export default function (app, supabase) {
 
             if (habitsError) {
                 console.error(habitsError);
+                console.error("cause:", habitsError.cause);
                 return res.status(500).json({ success: false, error: "Ошибка получения привычек" });
             }
 
@@ -66,6 +67,7 @@ export default function (app, supabase) {
 
         } catch (err) {
             console.error("Ошибка запроса к Supabase (/habits):", err);
+            console.error("cause:", err.cause);
             if (!res.headersSent) {
                 res.status(500).json({ success: false, error: "Ошибка сервера" });
             }

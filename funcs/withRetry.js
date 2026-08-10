@@ -8,10 +8,12 @@ export const withRetry = async (operation, maxRetries = 4) => {
 
             const isNetworkError =
                 err.message?.includes("fetch failed") ||
-                err.cause?.message?.includes("fetch") ||
-                err.name === "TypeError" ||
                 err.code === "ECONNRESET" ||
-                err.code === "ENOTFOUND";
+                err.code === "ENOTFOUND" ||
+                err.code === "ETIMEDOUT" ||
+                err.cause?.code === "ECONNRESET" ||
+                err.cause?.code === "ENOTFOUND" ||
+                err.cause?.code === "ETIMEDOUT";
 
             if (!isNetworkError || attempt === maxRetries) {
                 console.error(`❌ Supabase запрос окончательно провалился после ${attempt + 1} попыток:`, err);
