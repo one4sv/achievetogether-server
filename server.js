@@ -45,6 +45,7 @@ import counterRoutes from "./counter.js";
 import scheduleRoutes from "./schedule.js";
 import checklistRoutes from "./checklist.js";
 import markplanRoutes from "./markplan.js";
+import habit_statsRoutes from "./habit_stats.js";
 
 import { createClient } from "@supabase/supabase-js"
 import initWebSocket from "./ws.js";
@@ -116,6 +117,7 @@ counterRoutes(app, supabase);
 scheduleRoutes(app, supabase)
 checklistRoutes(app, supabase)
 markplanRoutes(app, supabase)
+habit_statsRoutes(app, supabase)
 logoutRoutes(app);
 
 const server = createServer(app);
