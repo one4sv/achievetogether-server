@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
-import { sendMail } from "./sendmail.js"; // твой модуль с API
+import { sendMail } from "./sendmail.js";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import { getMailTemplate } from "./funcs/mailTamlate.js";
