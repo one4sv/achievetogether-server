@@ -4,7 +4,7 @@ import resolveOriginalRedirect from "./funcs/resolveRedirect.js";
 export default function (app, supabase) {
   app.post("/contacts", authenticateUser(supabase), async (req, res) => {
     const { id: currentUserId } = req.user;
-    const { search } = req.body;
+    const { search, filter } = req.body; // filter: "personal" | "group" | undefined
 
     try {
       // 1. Все чаты пользователя
@@ -14,26 +14,39 @@ export default function (app, supabase) {
         .eq("user_id", currentUserId);
 
       const chatIds = Array.isArray(chat_members)
-        ? chat_members.map(c => c.chat_id)
+        ? chat_members.map((c) => c.chat_id)
         : [];
 
       if (chatIds.length === 0 && !search?.trim()) {
         return res.json({ success: true, friendsArr: [] });
       }
 
-      // 2. Детали чатов
-      const { data: chats } = await supabase
+      // 2. Детали чатов + фильтрация по типу сразу в запросе
+      let chatsQuery = supabase
         .from("chats")
         .select("id, name, avatar_url, is_group")
         .in("id", chatIds);
 
+      // Фильтр на уровне БД
+      if (filter === "personal") {
+        chatsQuery = chatsQuery.eq("is_group", false);
+      } else if (filter === "group") {
+        chatsQuery = chatsQuery.eq("is_group", true);
+      }
+
+      const { data: chats } = await chatsQuery;
       const safeChats = Array.isArray(chats) ? chats : [];
 
-      const privateChats = safeChats.filter(c => !c.is_group);
-      const groupChats = safeChats.filter(c => c.is_group);
+      const privateChats = safeChats.filter((c) => !c.is_group);
+      const groupChats = safeChats.filter((c) => c.is_group);
 
-      const privateChatIds = privateChats.map(c => c.id);
-      const groupChatIds = groupChats.map(c => c.id);
+      const privateChatIds = privateChats.map((c) => c.id);
+      const groupChatIds = groupChats.map((c) => c.id);
+
+      // Если после фильтра ничего не осталось и нет поиска — сразу выходим
+      if (safeChats.length === 0 && !search?.trim()) {
+        return res.json({ success: true, friendsArr: [] });
+      }
 
       // 3. Настройки пользователя для чатов
       const { data: userChatSettings } = await supabase
@@ -43,13 +56,13 @@ export default function (app, supabase) {
         .in("chat_id", chatIds);
 
       const settingsMap = {};
-      (userChatSettings || []).forEach(s => {
+      (userChatSettings || []).forEach((s) => {
         settingsMap[s.chat_id] = s;
       });
 
       // 4. Приватные контакты
       let privateContacts = [];
-      let safeOtherUsers = []; // ← Инициализируем здесь, чтобы была доступна всегда
+      let safeOtherUsers = [];
 
       if (privateChatIds.length > 0) {
         const { data: otherUsers } = await supabase
@@ -60,7 +73,7 @@ export default function (app, supabase) {
 
         safeOtherUsers = Array.isArray(otherUsers) ? otherUsers : [];
 
-        const uniqueUserIds = [...new Set(safeOtherUsers.map(u => u.user_id))];
+        const uniqueUserIds = [...new Set(safeOtherUsers.map((u) => u.user_id))];
 
         if (uniqueUserIds.length > 0) {
           const { data: users } = await supabase
@@ -68,8 +81,8 @@ export default function (app, supabase) {
             .select("id, username, nick, avatar_url")
             .in("id", uniqueUserIds);
 
-          privateContacts = (Array.isArray(users) ? users : []).map(user => {
-            const chatEntry = safeOtherUsers.find(cu => cu.user_id === user.id);
+          privateContacts = (Array.isArray(users) ? users : []).map((user) => {
+            const chatEntry = safeOtherUsers.find((cu) => cu.user_id === user.id);
             const settings = settingsMap[chatEntry?.chat_id] || {};
             return {
               id: user.id,
@@ -86,7 +99,7 @@ export default function (app, supabase) {
       }
 
       // 5. Групповые контакты
-      const groupContacts = groupChats.map(group => {
+      const groupContacts = groupChats.map((group) => {
         const settings = settingsMap[group.id] || {};
         return {
           id: group.id.toString(),
@@ -100,7 +113,9 @@ export default function (app, supabase) {
         };
       });
 
-      // 6. Последние сообщения со всеми полями
+      // 6. Последние сообщения (только по нужным чатам)
+      const relevantChatIds = [...privateChatIds, ...groupChatIds];
+
       const { data: rawMessages } = await supabase
         .from("messages")
         .select(`
@@ -119,14 +134,14 @@ export default function (app, supabase) {
           is_pinned,
           target_id
         `)
-        .in("chat_id", chatIds)
-        .not('hidden', 'cs', `{"${currentUserId}"}`)
+        .in("chat_id", relevantChatIds)
+        .not("hidden", "cs", `{"${currentUserId}"}`)
         .order("created_at", { ascending: false });
 
       const safeMessages = Array.isArray(rawMessages) ? rawMessages : [];
 
       // Файлы
-      const messageIds = safeMessages.map(m => m.id);
+      const messageIds = safeMessages.map((m) => m.id);
       const { data: files } = await supabase
         .from("message_files")
         .select("message_id, file_url, file_name, file_type")
@@ -134,11 +149,11 @@ export default function (app, supabase) {
 
       const safeFiles = Array.isArray(files) ? files : [];
 
-      const messagesWithFiles = safeMessages.map(msg => ({
+      const messagesWithFiles = safeMessages.map((msg) => ({
         ...msg,
         files: safeFiles
-          .filter(f => f.message_id === msg.id)
-          .map(f => ({
+          .filter((f) => f.message_id === msg.id)
+          .map((f) => ({
             url: f.file_url,
             name: f.file_name,
             type: f.file_type,
@@ -147,17 +162,15 @@ export default function (app, supabase) {
 
       // Последнее сообщение по чату
       const lastMessagesByChat = {};
-      messagesWithFiles.forEach(msg => {
+      messagesWithFiles.forEach((msg) => {
         if (!lastMessagesByChat[msg.chat_id]) {
           lastMessagesByChat[msg.chat_id] = msg;
         }
       });
 
-      // 7. Обработка redirected для lastMessage
+      // 7. Обработка redirected
       const lastMsgs = Object.values(lastMessagesByChat);
-      const redirectedIds = lastMsgs
-        .map(m => m.redirected_id)
-        .filter(Boolean);
+      const redirectedIds = lastMsgs.map((m) => m.redirected_id).filter(Boolean);
       const uniqueRedirectedIds = [...new Set(redirectedIds)];
 
       let redirectedMap = new Map();
@@ -201,7 +214,7 @@ export default function (app, supabase) {
 
       // Имена отправителей
       const allSenderIds = new Set([
-        ...lastMsgs.map(m => m.sender_id),
+        ...lastMsgs.map((m) => m.sender_id),
         ...Array.from(redirectedSenders),
         currentUserId,
       ]);
@@ -213,7 +226,7 @@ export default function (app, supabase) {
 
       const userMap = {};
       const nickMap = {};
-      (users || []).forEach(u => {
+      (users || []).forEach((u) => {
         userMap[u.id] = u.username || u.nick;
         nickMap[u.id] = u.nick;
       });
@@ -231,7 +244,7 @@ export default function (app, supabase) {
           redirected_nick: redirected && msg.show_names ? nickMap[redirected?.sender_id] : null,
           redirected_content: redirected ? redirected.content : null,
           redirected_files: redirected
-            ? (redirected.message_files || []).map(f => ({
+            ? (redirected.message_files || []).map((f) => ({
                 url: f.file_url,
                 name: f.file_name,
                 type: f.file_type,
@@ -245,7 +258,7 @@ export default function (app, supabase) {
 
       // 8. unread_count
       const unreadByChat = {};
-      messagesWithFiles.forEach(msg => {
+      messagesWithFiles.forEach((msg) => {
         if (msg.sender_id !== currentUserId && !msg.read_by.includes(currentUserId)) {
           unreadByChat[msg.chat_id] = (unreadByChat[msg.chat_id] || 0) + 1;
         }
@@ -258,13 +271,13 @@ export default function (app, supabase) {
         unread_count: unreadByChat[chatId] || 0,
       });
 
-      const fullPrivate = privateContacts.map(contact => {
-        const chatEntry = safeOtherUsers.find(cu => cu.user_id === contact.id);
+      const fullPrivate = privateContacts.map((contact) => {
+        const chatEntry = safeOtherUsers.find((cu) => cu.user_id === contact.id);
         const chatId = chatEntry?.chat_id;
         return addInfo(contact, chatId);
       });
 
-      const fullGroups = groupContacts.map(contact =>
+      const fullGroups = groupContacts.map((contact) =>
         addInfo(contact, parseInt(contact.id))
       );
 
@@ -275,37 +288,39 @@ export default function (app, supabase) {
         const lower = search.toLowerCase();
 
         const filteredPrivate = fullPrivate.filter(
-          c =>
+          (c) =>
             (c.name && c.name.toLowerCase().includes(lower)) ||
             (c.nick && c.nick.toLowerCase().includes(lower))
         );
 
         const filteredGroups = fullGroups.filter(
-          c => c.name && c.name.toLowerCase().includes(lower)
+          (c) => c.name && c.name.toLowerCase().includes(lower)
         );
 
-        // Новые пользователи по поиску
-        const { data: searchUsersData } = await supabase
-          .from("users")
-          .select("id, username, nick, avatar_url")
-          .or(`username.ilike.%${search}%,nick.ilike.%${search}%`)
-          .neq("id", currentUserId);
+        let newUsers = [];
+        if (filter !== "group") {
+          const { data: searchUsersData } = await supabase
+            .from("users")
+            .select("id, username, nick, avatar_url")
+            .or(`username.ilike.%${search}%,nick.ilike.%${search}%`)
+            .neq("id", currentUserId);
 
-        const existingIds = new Set(fullPrivate.map(c => c.id));
-        const newUsers = (Array.isArray(searchUsersData) ? searchUsersData : [])
-          .filter(u => !existingIds.has(u.id))
-          .map(u => ({
-            id: u.id,
-            name: u.username || null,
-            nick: u.nick,
-            avatar_url: u.avatar_url || null,
-            lastMessage: null,
-            unread_count: 0,
-            note: true,
-            pinned: false,
-            is_blocked: false,
-            is_group: false,
-          }));
+          const existingIds = new Set(fullPrivate.map((c) => c.id));
+          newUsers = (Array.isArray(searchUsersData) ? searchUsersData : [])
+            .filter((u) => !existingIds.has(u.id))
+            .map((u) => ({
+              id: u.id,
+              name: u.username || null,
+              nick: u.nick,
+              avatar_url: u.avatar_url || null,
+              lastMessage: null,
+              unread_count: 0,
+              note: true,
+              pinned: false,
+              is_blocked: false,
+              is_group: false,
+            }));
+        }
 
         result = [...filteredPrivate, ...filteredGroups, ...newUsers];
       }
