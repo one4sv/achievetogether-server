@@ -5,6 +5,7 @@ import crypto from "crypto";
 import path from "path";
 import { BotInit } from "./bot.js";
 import resolveOriginalRedirect from "./funcs/resolveRedirect.js";
+import { getChatMessages } from "./funcs/getChatMessages.js";
 
 export default function (app, supabase) {
   const upload = multer({ storage: multer.memoryStorage() });
@@ -16,6 +17,10 @@ export default function (app, supabase) {
   app.get("/chat/:nick", authenticateUser(supabase), async (req, res) => {
     const { id } = req.user;
     const chatWithNick = req.params.nick;
+
+    const limit = req.query.limit;
+    const beforeId = req.query.beforeId;
+    const aroundId = req.query.aroundId;
 
     try {
       const { data: chatWith, error: userError } = await supabase
@@ -34,7 +39,7 @@ export default function (app, supabase) {
         .eq("user_id", id)
         .eq("chats.is_group", false);
 
-      const myChatIds = (myChats || []).map(c => c.chat_id);
+      const myChatIds = (myChats || []).map((c) => c.chat_id);
 
       const { data: theirChats } = await supabase
         .from("chat_members")
@@ -42,15 +47,16 @@ export default function (app, supabase) {
         .eq("user_id", chatWith.id)
         .eq("chats.is_group", false);
 
-      const theirChatIds = (theirChats || []).map(c => c.chat_id);
+      const theirChatIds = (theirChats || []).map((c) => c.chat_id);
 
-      const chatId = myChatIds.find(id => theirChatIds.includes(id));
+      const chatId = myChatIds.find((id) => theirChatIds.includes(id));
 
       let messages = [];
+      let hasMore = false;
       let chatMember = { note: null, pinned: false, is_blocked: false };
 
       if (chatId) {
-        const { data: cm, error: cmError } = await supabase
+        const { data: cm } = await supabase
           .from("chat_members")
           .select("note, pinned, is_blocked")
           .eq("chat_id", chatId)
@@ -68,134 +74,32 @@ export default function (app, supabase) {
 
         chatWith.am_i_blocked = am_i_blocked_data?.is_blocked || false;
 
-        const { data: msgs } = await supabase
-          .from("messages")
-          .select(`
-            id,
-            sender_id,
-            content,
-            created_at,
-            read_by,
-            reactions,
-            message_files (file_url, file_name, file_type),
-            answer_id,
-            edited,
-            redirected_id,
-            show_names,
-            is_system,
-            is_pinned,
-            target_id
-          `)
-          .eq("chat_id", chatId)
-          .not('hidden', 'cs', `{"${id}"}`)
-          .order("created_at", { ascending: true });
+        // ===== Используем хелпер =====
+        const result = await getChatMessages(supabase, chatId, id, {
+          limit,
+          beforeId,
+          aroundId,
+        });
 
-        // Безопасный map на msgs (если msgs null — [])
-        const redirectedIds = (msgs || [])
-          .map(msg => msg.redirected_id)
-          .filter(rId => rId !== null);
+        messages = result.messages;
+        hasMore = result.hasMore;
 
-        const uniqueRedirectedIds = [...new Set(redirectedIds)];
+        // Помечаем как прочитанные (только при первой загрузке / around)
+        if (!beforeId) {
+          const messagesToUpdate = messages.filter(
+            (m) => m.sender_id !== id && !m.read_by.includes(id)
+          );
 
-        let redirectedMap = new Map();
-        let redirectedMsgs = [];
+          if (messagesToUpdate.length > 0) {
+            for (const m of messagesToUpdate) {
+              await supabase
+                .from("messages")
+                .update({ read_by: [...m.read_by, id] })
+                .eq("id", m.id);
 
-        if (uniqueRedirectedIds.length > 0) {
-          const { data: redirectedData } = await supabase
-            .from("messages")
-            .select(`
-              id,
-              sender_id,
-              content,
-              created_at,
-              message_files (file_url, file_name, file_type),
-              answer_id,
-              edited,
-              is_system,
-              is_pinned
-            `)
-            .in("id", uniqueRedirectedIds);
-
-          // Безопасный обработка redirectedData
-          if (redirectedData) {
-            for (const m of redirectedData) {
-              if (m.redirected_id) {
-                const originalId = await resolveOriginalRedirect(supabase, m.redirected_id);
-                const { data: original } = await supabase
-                  .from("messages")
-                  .select("content, answer_id, message_files (file_url, file_name, file_type), is_system")
-                  .eq("id", originalId)
-                  .single();
-
-                if (original) {
-                  m.content = original.content;
-                  m.answer_id = original.answer_id;
-                  m.message_files = original.message_files;
-                }
-              }
-              redirectedMap.set(m.id, m);
+              broadcastMessageRead(chatId, m.id, id);
             }
-            redirectedMsgs = redirectedData;
           }
-        }
-
-        const allSenderIds = new Set();
-        (msgs || []).forEach(msg => allSenderIds.add(msg.sender_id));
-        redirectedMsgs.forEach(m => allSenderIds.add(m.sender_id));
-        allSenderIds.add(id);
-        allSenderIds.add(chatWith.id);
-
-        const { data: users } = await supabase
-          .from("users")
-          .select("id, username, nick")
-          .in("id", Array.from(allSenderIds));
-
-        const userMap = {};
-        const nickMap = {};
-        (users || []).forEach(u => {
-          userMap[u.id] = u.username || u.nick;
-          nickMap[u.id] = u.nick;
-        });
-
-        messages = (msgs || []).map(msg => {
-          const redirected = msg.redirected_id ? redirectedMap.get(msg.redirected_id) : null;
-          return {
-            ...msg,
-            sender_name: userMap[msg.sender_id],
-            sender_nick: nickMap[msg.sender_id],
-            read_by: msg.read_by || [],
-            redirected_name: redirected && msg.show_names ? userMap[redirected.sender_id] : null,
-            redirected_nick: redirected && msg.show_names ? nickMap[redirected.sender_id] : null,
-            redirected_content: redirected ? redirected.content : null,
-            redirected_files: redirected ? (redirected.message_files || []).map(f => ({
-              url: f.file_url,
-              name: f.file_name,
-              type: f.file_type
-            })) : null,
-            redirected_answer: redirected ? redirected.answer_id : null,
-            files: msg.message_files
-              ? msg.message_files.map(f => ({
-                  url: f.file_url,
-                  name: f.file_name,
-                  type: f.file_type
-                }))
-              : []
-          };
-        });
-      }
-
-      const messagesToUpdate = messages.filter(
-        m => m.sender_id !== id && !m.read_by.includes(id)
-      );
-
-      if (messagesToUpdate.length > 0 && chatId) { // добавлена проверка chatId
-        for (const m of messagesToUpdate) {
-          await supabase
-            .from("messages")
-            .update({ read_by: [...m.read_by, id] })
-            .eq("id", m.id);
-
-          broadcastMessageRead(chatId, m.id, id);
         }
       }
 
@@ -212,8 +116,9 @@ export default function (app, supabase) {
           pinned: chatMember.pinned,
           am_i_blocked: chatWith.am_i_blocked,
         },
-        chat_id:chatId,
+        chat_id: chatId,
         messages,
+        hasMore,
       });
     } catch (err) {
       console.error("Ошибка запроса к Supabase:", err);
@@ -224,6 +129,10 @@ export default function (app, supabase) {
   app.get("/chat/group/:id", authenticateUser(supabase), async (req, res) => {
     const { id: userId } = req.user;
     const chatId = req.params.id;
+
+    const limit = req.query.limit;
+    const beforeId = req.query.beforeId;
+    const aroundId = req.query.aroundId;
 
     try {
       const { data: member, error: memberError } = await supabase
@@ -252,144 +161,38 @@ export default function (app, supabase) {
         .select("user_id")
         .eq("chat_id", chatId);
 
-      const userIds = (memberIds || []).map(m => m.user_id);
+      const userIds = (memberIds || []).map((m) => m.user_id);
 
       const { data: members } = await supabase
         .from("users")
         .select("id, nick, username, avatar_url")
         .in("id", userIds);
 
-      const { data: msgs } = await supabase
-        .from("messages")
-        .select(`
-          id,
-          sender_id,
-          content,
-          created_at,
-          read_by,
-          reactions,
-          message_files (file_url, file_name, file_type),
-          answer_id,
-          edited,
-          redirected_id,
-          show_names,
-          is_system,
-          is_pinned,
-          target_id
-        `)
-        .eq("chat_id", chatId)
-        .not('hidden', 'cs', `{"${userId}"}`)
-        .order("created_at", { ascending: true });
+      // ===== Используем хелпер =====
+      const result = await getChatMessages(supabase, chatId, userId, {
+        limit,
+        beforeId,
+        aroundId,
+      });
 
-      let messages = [];
+      const messages = result.messages;
+      const hasMore = result.hasMore;
 
-      if (msgs && msgs.length > 0) {
-        // Безопасный map
-        const redirectedIds = (msgs || [])
-          .map(msg => msg.redirected_id)
-          .filter(rId => rId !== null);
+      // Помечаем как прочитанные (только при первой загрузке / around)
+      if (!beforeId) {
+        const messagesToUpdate = messages.filter(
+          (m) => m.sender_id !== userId && !m.read_by.includes(userId)
+        );
 
-        const uniqueRedirectedIds = [...new Set(redirectedIds)];
+        if (messagesToUpdate.length > 0) {
+          for (const m of messagesToUpdate) {
+            await supabase
+              .from("messages")
+              .update({ read_by: [...m.read_by, userId] })
+              .eq("id", m.id);
 
-        let redirectedMap = new Map();
-        let redirectedSenders = new Set();
-
-        if (uniqueRedirectedIds.length > 0) {
-          const { data: redirectedData } = await supabase
-            .from("messages")
-            .select(`
-              id,
-              sender_id,
-              content,
-              answer_id,
-              message_files (file_url, file_name, file_type),
-              is_system
-            `)
-            .in("id", uniqueRedirectedIds);
-
-          if (redirectedData) {
-            for (const m of redirectedData) {
-              if (m.redirected_id) {
-                const originalId = await resolveOriginalRedirect(supabase, m.redirected_id);
-                const { data: original } = await supabase
-                  .from("messages")
-                  .select("content, answer_id, message_files (file_url, file_name, file_type), is_system")
-                  .eq("id", originalId)
-                  .single();
-
-                if (original) {
-                  m.content = original.content;
-                  m.answer_id = original.answer_id;
-                  m.message_files = original.message_files;
-                  m.is_system = original.is_system;
-                }
-              }
-              redirectedMap.set(m.id, m);
-              redirectedSenders.add(m.sender_id);
-            }
+            broadcastMessageRead(chatId, m.id, userId);
           }
-        }
-
-        const allSenderIds = new Set([
-          ...(msgs || []).map(m => m.sender_id),
-          ...redirectedSenders,
-          userId
-        ]);
-
-        const { data: users } = await supabase
-          .from("users")
-          .select("id, username, nick")
-          .in("id", Array.from(allSenderIds));
-
-        const userMap = {};
-        const nickMap = {};
-        (users || []).forEach(u => {
-          userMap[u.id] = u.username || u.nick;
-          nickMap[u.id] = u.nick;
-        });
-
-        messages = (msgs || []).map(msg => {
-          const redirected = msg.redirected_id ? redirectedMap.get(msg.redirected_id) : null;
-
-          return {
-            ...msg,
-            sender_name: userMap[msg.sender_id] || null,
-            sender_nick: nickMap[msg.sender_id] || null,
-            files: msg.message_files
-              ? msg.message_files.map(f => ({
-                  url: f.file_url,
-                  name: f.file_name,
-                  type: f.file_type
-                }))
-              : [],
-            redirected_name: redirected && msg.show_names ? userMap[redirected.sender_id] : null,
-            redirected_nick: redirected && msg.show_names ? nickMap[redirected.sender_id] : null,
-            redirected_content: redirected ? redirected.content : null,
-            redirected_files: redirected
-              ? (redirected.message_files || []).map(f => ({
-                  url: f.file_url,
-                  name: f.file_name,
-                  type: f.file_type
-                }))
-              : null,
-            redirected_answer: redirected ? redirected.answer_id : null,
-            is_system: msg.is_system
-          };
-        });
-      }
-
-      const messagesToUpdate = messages.filter(
-        m => m.sender_id !== userId && !m.read_by.includes(userId)
-      );
-
-      if (messagesToUpdate.length > 0) {
-        for (const m of messagesToUpdate) {
-          await supabase
-            .from("messages")
-            .update({ read_by: [...m.read_by, userId] })
-            .eq("id", m.id);
-
-          broadcastMessageRead(chatId, m.id, userId);
         }
       }
 
@@ -400,14 +203,20 @@ export default function (app, supabase) {
           name: chat.name,
           avatar_url: chat.avatar_url,
           is_group: true,
-          members: (members || []).map(m => ({ id: m.id, nick: m.nick, avatar_url: m.avatar_url, name: m.username })),
+          members: (members || []).map((m) => ({
+            id: m.id,
+            nick: m.nick,
+            avatar_url: m.avatar_url,
+            name: m.username,
+          })),
           note: member.note ?? false,
           is_blocked: member.is_blocked ?? false,
           pinned: member.pinned ?? false,
           am_i_blocked: false,
-          last_online: ""
+          last_online: "",
         },
-        messages
+        messages,
+        hasMore,
       });
     } catch (err) {
       console.error("Ошибка в /chat/group/:id:", err);
