@@ -46,7 +46,7 @@ export async function broadcastNewMessage(chat_id, message) {
       const userSettings = settingsMap.get(userId);
       const allNote = userSettings?.all_note ?? true;
       const newMessNote = userSettings?.new_mess_note ?? true;
-      const chatNote = member.note ?? true;  // Добавьте дефолт для chatNote
+      const chatNote = member.note ?? true;
       console.log("UserId:", userId, "allNote:", allNote, "newMessNote:", newMessNote, "chatNote:", chatNote);
      
       if (allNote && newMessNote && chatNote) {

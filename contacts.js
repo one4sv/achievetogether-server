@@ -21,13 +21,12 @@ export default function (app, supabase) {
         return res.json({ success: true, friendsArr: [] });
       }
 
-      // 2. Детали чатов + фильтрация по типу сразу в запросе
+      // 2. Детали чатов + фильтрация по типу
       let chatsQuery = supabase
         .from("chats")
         .select("id, name, avatar_url, is_group")
         .in("id", chatIds);
 
-      // Фильтр на уровне БД
       if (filter === "personal") {
         chatsQuery = chatsQuery.eq("is_group", false);
       } else if (filter === "group") {
@@ -43,7 +42,6 @@ export default function (app, supabase) {
       const privateChatIds = privateChats.map((c) => c.id);
       const groupChatIds = groupChats.map((c) => c.id);
 
-      // Если после фильтра ничего не осталось и нет поиска — сразу выходим
       if (safeChats.length === 0 && !search?.trim()) {
         return res.json({ success: true, friendsArr: [] });
       }
@@ -63,8 +61,23 @@ export default function (app, supabase) {
       // 4. Приватные контакты
       let privateContacts = [];
       let safeOtherUsers = [];
+      let selfChatId = null; // ← id чата "Избранное"
 
       if (privateChatIds.length > 0) {
+        // Ищем self-чат (чат, в котором только текущий пользователь)
+        for (const chatId of privateChatIds) {
+          const { count } = await supabase
+            .from("chat_members")
+            .select("*", { count: "exact", head: true })
+            .eq("chat_id", chatId);
+
+          if (count === 1) {
+            selfChatId = chatId;
+            break;
+          }
+        }
+
+        // Обычные приватные чаты (с другими людьми)
         const { data: otherUsers } = await supabase
           .from("chat_members")
           .select("chat_id, user_id")
@@ -98,6 +111,30 @@ export default function (app, supabase) {
         }
       }
 
+      // ===== Добавляем "Избранное" =====
+      if (selfChatId && filter !== "group") {
+        const settings = settingsMap[selfChatId] || {};
+
+        // Получаем данные текущего пользователя
+        const { data: me } = await supabase
+          .from("users")
+          .select("id, username, nick, avatar_url")
+          .eq("id", currentUserId)
+          .single();
+
+        privateContacts.unshift({
+          id: me.id,
+          name: "Избранное",          // или null, если хочешь показывать через фронт
+          nick: me.nick,
+          avatar_url: null,           // иконка будет на фронте
+          is_group: false,
+          is_favorite: true,          // ← специальный флаг
+          note: settings.note ?? false,
+          pinned: settings.pinned ?? false,
+          is_blocked: settings.is_blocked ?? false,
+        });
+      }
+
       // 5. Групповые контакты
       const groupContacts = groupChats.map((group) => {
         const settings = settingsMap[group.id] || {};
@@ -113,7 +150,7 @@ export default function (app, supabase) {
         };
       });
 
-      // 6. Последние сообщения (только по нужным чатам)
+      // 6. Последние сообщения
       const relevantChatIds = [...privateChatIds, ...groupChatIds];
 
       const { data: rawMessages } = await supabase
@@ -272,6 +309,11 @@ export default function (app, supabase) {
       });
 
       const fullPrivate = privateContacts.map((contact) => {
+        // Для Избранного используем selfChatId
+        if (contact.is_favorite) {
+          return addInfo(contact, selfChatId);
+        }
+
         const chatEntry = safeOtherUsers.find((cu) => cu.user_id === contact.id);
         const chatId = chatEntry?.chat_id;
         return addInfo(contact, chatId);
@@ -290,7 +332,8 @@ export default function (app, supabase) {
         const filteredPrivate = fullPrivate.filter(
           (c) =>
             (c.name && c.name.toLowerCase().includes(lower)) ||
-            (c.nick && c.nick.toLowerCase().includes(lower))
+            (c.nick && c.nick.toLowerCase().includes(lower)) ||
+            (c.is_favorite && "избранное".includes(lower))
         );
 
         const filteredGroups = fullGroups.filter(
