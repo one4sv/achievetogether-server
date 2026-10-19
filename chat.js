@@ -488,7 +488,7 @@ export default function (app, supabase) {
       // Инфо отправителя
       const { data: senderInfo } = await supabase
         .from("users")
-        .select("username, nick")
+        .select("username, nick, avatar_url")
         .eq("id", senderId)
         .single();
 
@@ -550,6 +550,7 @@ export default function (app, supabase) {
           ...msg,
           sender_name: senderInfo ? senderInfo.username || senderInfo.nick : null,
           sender_nick: senderInfo ? senderInfo.nick : null,
+          sender_avatar_url: senderInfo?.avatar_url,
           read_by: msg.read_by || [],
           reactions: [],
           files: currentMsgFiles,

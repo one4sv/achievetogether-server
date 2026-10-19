@@ -4,7 +4,6 @@ export default function (app, supabase) {
   app.get("/acc/:nick", authenticateUser(supabase), async (req, res) => {
     try {
       const { nick } = req.params;
-      const user_id = req.user?.id || null;
 
       const { data: acc, error: accError } = await supabase
         .from("users")
@@ -48,65 +47,12 @@ export default function (app, supabase) {
 
       if (postsError) throw postsError;
 
-      let media = [];
-
-      if (user_id) {
-        const { data: userChats, error: userChatsError } = await supabase
-          .from("chat_members")
-          .select("chat_id")
-          .eq("user_id", user_id);
-
-        if (userChatsError) throw userChatsError;
-
-        const { data: accChats, error: accChatsError } = await supabase
-          .from("chat_members")
-          .select("chat_id")
-          .eq("user_id", acc.id);
-
-        if (accChatsError) throw accChatsError;
-
-        const commonChatIds =
-          userChats
-            ?.map(c => c.chat_id)
-            .filter(c => accChats?.some(a => a.chat_id === c)) || [];
-
-        if (commonChatIds.length > 0) {
-          const { data: messages, error: msgError } = await supabase
-            .from("messages")
-            .select("id")
-            .in("chat_id", commonChatIds);
-
-          if (msgError) throw msgError;
-
-          const messageIds = messages?.map(m => m.id) || [];
-
-          if (messageIds.length > 0) {
-            const { data: files, error: filesError } = await supabase
-              .from("message_files")
-              .select("id, file_url, file_type, file_name, message_id")
-              .in("message_id", messageIds)
-              .order("created_at", { ascending: false });
-
-            if (filesError) throw filesError;
-
-            media =
-              files?.map(f => ({
-                url: f.file_url,
-                name: f.file_name,
-                type: f.file_type,
-                message_id: f.message_id,
-              })) || [];
-          }
-        }
-      }
-
       return res.json({
         success: true,
         acc,
         habits: habits || [],
         privateRules: isPrivate,
         posts: posts || [],
-        media,
       });
     } catch (err) {
       console.error("Ошибка при получении аккаунта:", err);
