@@ -1,0 +1,99 @@
+import registerRoutes from "./auth/register.js";
+import authRoutes from "./auth/auth.js";
+import confirmRoutes from "./auth/confirm.js";
+import userRoutes from "./users/user.js";
+import logoutRoutes from "./auth/logout.js";
+import addhabitRoutes from "./habits/addhabit.js";
+import habitsRoutes from "./habits/habits.js";
+import settingsRoutes from "./settings/settings.js";
+import updatesettingsRoutes from "./settings/updatesettings.js";
+import updatehabitRoutes from "./habits/updatehabit.js";
+import contactsRoutes from "./chat/contacts.js";
+import chatRoutes from "./chat/chat.js";
+import adminRoutes from "./system/admin.js";
+import accRoutes from "./users/acc.js";
+import deleteRoutes from "./system/delete.js";
+import updateuserRoutes from "./users/updateuser.js";
+import uploadavatarRoutes from "./users/uploadavatar.js";
+import uploadbgRoutes from "./settings/uploadbg.js";
+import markdoneRoutes from "./habits/markdone.js";
+import calendarRoutes from "./habits/calendar.js";
+import daycommentRoutes from "./habits/daycomment.js";
+import pingRoutes from "./system/ping.js";
+import reactionsRoutes from "./chat/reaction.js";
+import askauthRoutes from "./auth/askauth.js";
+import addpostRoutes from "./posts/addpost.js";
+import postsRoutes from "./posts/posts.js";
+import uppostRoutes from "./posts/uppost.js";
+import likeRoutes from "./posts/like.js";
+import sendcommentRoutes from "./posts/sendcomment.js";
+import commentsRoutes from "./posts/comments.js";
+import offsoundRoutes from "./chat/offsound.js";
+import toggleblockedRoutes from "./chat/toggleblocked.js";
+import togglepinnedRoutes from "./chat/togglepinned.js";
+import createchatRoutes from "./chat/createchat.js";
+import groupRoutes from "./chat/group.js";
+import updategroupRoutes from "./chat/updategroup.js";
+import pinmessRoutes from "./chat/pinmess.js";
+import identifyuserRoutes from "./users/identifyuser.js";
+import getpermissionsRoutes from "./chat/getpermissions.js";
+import editpermissionsRoutes from "./chat/editpermissions.js";
+import timerRoutes from "./habits/timer.js";
+import counterRoutes from "./habits/counter.js";
+import scheduleRoutes from "./habits/schedule.js";
+import checklistRoutes from "./habits/checklist.js";
+import markplanRoutes from "./habits/markplan.js";
+import habit_statsRoutes from "./habits/habit_stats.js";
+import LinkPreviewRoutes from "./system/link-preview.js";
+import ChatMediaRoutes from "./chat/ChatMedia.js";
+
+export default function registerAllRoutes(app, supabase) {
+    registerRoutes(app, supabase);
+    authRoutes(app, supabase);
+    confirmRoutes(app, supabase);
+    userRoutes(app, supabase);
+    addhabitRoutes(app, supabase);
+    habitsRoutes(app, supabase);
+    settingsRoutes(app, supabase);
+    updatesettingsRoutes(app, supabase);
+    updatehabitRoutes(app, supabase);
+    contactsRoutes(app, supabase);
+    chatRoutes(app, supabase);
+    adminRoutes(app, supabase);
+    accRoutes(app, supabase);
+    deleteRoutes(app, supabase);
+    updateuserRoutes(app, supabase);
+    uploadavatarRoutes(app, supabase);
+    uploadbgRoutes(app, supabase);
+    markdoneRoutes(app, supabase);
+    calendarRoutes(app, supabase);
+    daycommentRoutes(app, supabase);
+    pingRoutes(app, supabase);
+    reactionsRoutes(app, supabase);
+    askauthRoutes(app, supabase);
+    addpostRoutes(app, supabase);
+    postsRoutes(app, supabase);
+    uppostRoutes(app, supabase);
+    likeRoutes(app, supabase);
+    sendcommentRoutes(app, supabase);
+    commentsRoutes(app, supabase);
+    offsoundRoutes(app, supabase);
+    toggleblockedRoutes(app, supabase);
+    togglepinnedRoutes(app, supabase);
+    createchatRoutes(app, supabase);
+    groupRoutes(app, supabase);
+    updategroupRoutes(app, supabase);
+    pinmessRoutes(app, supabase)
+    identifyuserRoutes(app, supabase);
+    getpermissionsRoutes(app, supabase);
+    editpermissionsRoutes(app, supabase);
+    timerRoutes(app, supabase);
+    counterRoutes(app, supabase);
+    scheduleRoutes(app, supabase)
+    checklistRoutes(app, supabase)
+    markplanRoutes(app, supabase)
+    habit_statsRoutes(app, supabase)
+    ChatMediaRoutes(app, supabase);
+    logoutRoutes(app);
+    LinkPreviewRoutes(app)
+}

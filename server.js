@@ -1,136 +1,20 @@
-import express from "express";
-import cors from "cors";
-import registerRoutes from "./register.js";
-import authRoutes from "./auth.js";
-import confirmRoutes from "./confirm.js";
-import userRoutes from "./user.js";
-import logoutRoutes from "./logout.js";
-import addhabitRoutes from "./addhabit.js";
-import habitsRoutes from "./habits.js";
-import settingsRoutes from "./settings.js";
-import updatesettingsRoutes from "./updatesettings.js";
-import updatehabitRoutes from "./updatehabit.js";
-import contactsRoutes from "./contacts.js";
-import chatRoutes from "./chat.js";
-import adminRoutes from "./admin.js";
-import accRoutes from "./acc.js";
-import deleteRoutes from "./delete.js";
-import updateuserRoutes from "./updateuser.js"
-import uploadavatarRoutes from "./uploadavatar.js"
-import uploadbgRoutes from "./uploadbg.js"
-import markdoneRoutes from "./markdone.js"
-import calendarRoutes from "./calendar.js"
-import daycommentRoutes from "./daycomment.js"
-import pingRoutes from "./ping.js"
-import reactionsRoutes from "./reaction.js"
-import askauthRoutes from "./askauth.js"
-import addpostRoutes from "./addpost.js"
-import postsRoutes from "./posts.js"
-import uppostRoutes from "./uppost.js"
-import likeRoutes from "./like.js"
-import sendcommentRoutes from "./sendcomment.js"
-import commentsRoutes from "./comments.js"
-import offsoundRoutes from "./offsound.js"
-import toggleblockedRoutes from "./toggleblocked.js"
-import togglepinnedRoutes from "./togglepinned.js"
-import createchatRoutes from "./createchat.js"
-import groupRoutes from "./group.js"
-import updategroupRoutes from "./updategroup.js";
-import pinmessRoutes from "./pinmess.js"
-import identifyuserRoutes from "./identifyuser.js"
-import getpermissionsRoutes from "./getpermissions.js";
-import editpermissionsRoutes from "./editpermissions.js";
-import timerRoutes from "./timer.js";
-import counterRoutes from "./counter.js";
-import scheduleRoutes from "./schedule.js";
-import checklistRoutes from "./checklist.js";
-import markplanRoutes from "./markplan.js";
-import habit_statsRoutes from "./habit_stats.js";
-import LinkPreviewRoutes from "./link-preview.js";
-import ChatMediaRoutes from "./ChatMedia.js";
+import "./config/env.js";
+import { createClient } from "@supabase/supabase-js";
+import { createServer } from "node:http";
+import createApp from "./app.js";
+import initWebSocket from "./realtime/ws.js";
 
-import { createClient } from "@supabase/supabase-js"
-import initWebSocket from "./ws.js";
-import cookieParser from "cookie-parser";
-import { createServer } from "http";
-import dotenv from "dotenv";
+process.stdout.setDefaultEncoding("utf8");
+process.stderr.setDefaultEncoding("utf8");
 
-dotenv.config();
-process.stdout.setDefaultEncoding('utf8');
-process.stderr.setDefaultEncoding('utf8');
-
-const app = express();
-
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'https://achievetogether.vercel.app',
-  credentials: true
-}));
-
-app.use(express.json());
-app.use(cookieParser());
-
-app.get('/', (req, res) => {
-  res.send('Backend AT server is running');
-});
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY || !process.env.JWT_SECRET) {
+    throw new Error("Set SUPABASE_URL, SUPABASE_KEY and JWT_SECRET in server/.env");
+}
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-
-registerRoutes(app, supabase);
-authRoutes(app, supabase);
-confirmRoutes(app, supabase);
-userRoutes(app, supabase);
-addhabitRoutes(app, supabase);
-habitsRoutes(app, supabase);
-settingsRoutes(app, supabase);
-updatesettingsRoutes(app, supabase);
-updatehabitRoutes(app, supabase);
-contactsRoutes(app, supabase);
-chatRoutes(app, supabase);
-adminRoutes(app, supabase);
-accRoutes(app, supabase);
-deleteRoutes(app, supabase);
-updateuserRoutes(app, supabase);
-uploadavatarRoutes(app, supabase);
-uploadbgRoutes(app, supabase);
-markdoneRoutes(app, supabase);
-calendarRoutes(app, supabase);
-daycommentRoutes(app, supabase);
-pingRoutes(app, supabase);
-reactionsRoutes(app, supabase);
-askauthRoutes(app, supabase);
-addpostRoutes(app, supabase);
-postsRoutes(app, supabase);
-uppostRoutes(app, supabase);
-likeRoutes(app, supabase);
-sendcommentRoutes(app, supabase);
-commentsRoutes(app, supabase);
-offsoundRoutes(app, supabase);
-toggleblockedRoutes(app, supabase);
-togglepinnedRoutes(app, supabase);
-createchatRoutes(app, supabase);
-groupRoutes(app, supabase);
-updategroupRoutes(app, supabase);
-pinmessRoutes(app, supabase)
-identifyuserRoutes(app, supabase);
-getpermissionsRoutes(app, supabase);
-editpermissionsRoutes(app, supabase);
-timerRoutes(app, supabase);
-counterRoutes(app, supabase);
-scheduleRoutes(app, supabase)
-checklistRoutes(app, supabase)
-markplanRoutes(app, supabase)
-habit_statsRoutes(app, supabase)
-ChatMediaRoutes(app, supabase);
-
-logoutRoutes(app);
-LinkPreviewRoutes(app)
-
+const app = createApp(supabase);
 const server = createServer(app);
-
 initWebSocket(supabase, server);
 
-// Запуск сервера
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+const port = process.env.PORT || 3001;
+server.listen(port, () => console.log(`AT server running on port ${port}`));
