@@ -1,5 +1,7 @@
 import registerRoutes from "./auth/register.js";
 import authRoutes from "./auth/auth.js";
+import deviceRoutes from "./auth/devices.js";
+import postRoute from "./posts/post.js";
 import confirmRoutes from "./auth/confirm.js";
 import userRoutes from "./users/user.js";
 import logoutRoutes from "./auth/logout.js";
@@ -50,6 +52,8 @@ import ChatMediaRoutes from "./chat/ChatMedia.js";
 export default function registerAllRoutes(app, supabase) {
     registerRoutes(app, supabase);
     authRoutes(app, supabase);
+    deviceRoutes(app, supabase);
+    postRoute(app, supabase);
     confirmRoutes(app, supabase);
     userRoutes(app, supabase);
     addhabitRoutes(app, supabase);
