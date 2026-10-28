@@ -1,3 +1,4 @@
+import { readablePost, signedMedia } from "../../utils/postContent.js";
 import multer from "multer";
 import { authenticateUser } from "../../middleware/token.js";
 
@@ -6,6 +7,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 export default function (app, supabase) {
     app.post("/sendcomment", authenticateUser(supabase), upload.array("media"), async (req, res) => {
         try {
+            if (!req.user?.id) return res.status(401).json({ success: false });
+            if (!await readablePost(supabase, req.body.id, req.user.id)) return res.status(404).json({ success: false });
             const { id: user_id } = req.user;
             const { id, text } = req.body; // id = post_id
             if (!id) {
@@ -69,6 +72,7 @@ export default function (app, supabase) {
             // собираем финальный объект
             const comment = {
                 ...data,
+                files: await signedMedia(supabase, data.files, "comments"),
                 user: userData,
             };
 

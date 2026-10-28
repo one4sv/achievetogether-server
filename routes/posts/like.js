@@ -1,19 +1,17 @@
+import { readablePost } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
   app.post("/like", authenticateUser(supabase), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false });
     const { id: user_id } = req.user; // из middleware
     const { id: post_id } = req.body;
 
     try {
       // 1. Получаем пост
-      const { data: postData, error: getError } = await supabase
-        .from("posts")
-        .select("likes")
-        .eq("id", post_id)
-        .single();
+      const postData = await readablePost(supabase, post_id, user_id);
 
-      if (getError || !postData)
+      if (!postData)
         return res.status(404).json({ success: false, message: "Пост не найден" });
 
       // 2. Преобразуем likes (jsonb)

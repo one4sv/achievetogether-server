@@ -1,3 +1,4 @@
+import { visiblePosts, signedMedia } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
 const array = value => {
     try {
@@ -30,31 +31,8 @@ export default function postRoute(app, supabase) {
                     error: settingsError
                 } = await supabase.from("settings").select("private").eq("user_id", post.user_id).maybeSingle();
                 if (settingsError) throw settingsError;
-                const visibility = settings?.private?.posts ?? "all";
-                if (req.user?.id !== post.user_id && visibility !== "all") {
-                    if (!req.user?.id || visibility !== "contacts") return res.status(404).json({
-                        success: false
-                    });
-                    const {
-                        data: own,
-                        error: ownError
-                    } = await supabase.from("chat_members").select("chat_id,is_blocked").eq("user_id", req.user.id);
-                    if (ownError) throw ownError;
-                    const ids = (own || []).filter(row => !row.is_blocked).map(row => row.chat_id);
-                    if (!ids.length) return res.status(404).json({
-                        success: false
-                    });
-                    const {
-                        data: shared,
-                        error: sharedError
-                    } = await supabase.from("chat_members").select("chat_id,is_blocked").eq("user_id", post.user_id).in(
-                        "chat_id",
-                        ids
-                    );
-                    if (sharedError) throw sharedError;
-                    if (!shared?.some(row => !row.is_blocked)) return res.status(404).json({
-                        success: false
-                    });
+                if (!(await visiblePosts(supabase, [post], req.user?.id)).length) {
+                    return res.status(404).json({ success: false });
                 }
                 const {
                     data: user,
@@ -78,7 +56,9 @@ export default function postRoute(app, supabase) {
                             id: post.id,
                             user,
                             text: post.text ?? "",
-                            media: array(post.media),
+                            content: post.content ?? null,
+                            visibility: post.visibility ?? "inherit",
+                            media: await signedMedia(supabase, post.media, "posts"),
                             likes: array(post.likes),
                             habit,
                             created_at: post.created_at,

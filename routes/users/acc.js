@@ -1,8 +1,10 @@
+import { visiblePosts, signedRows } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
   app.get("/acc/:nick", authenticateUser(supabase), async (req, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const { nick } = req.params;
 
       const { data: acc, error: accError } = await supabase
@@ -52,7 +54,7 @@ export default function (app, supabase) {
         acc,
         habits: habits || [],
         privateRules: isPrivate,
-        posts: posts || [],
+        posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id), "media", "posts"),
       });
     } catch (err) {
       console.error("Ошибка при получении аккаунта:", err);

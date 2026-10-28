@@ -1,3 +1,4 @@
+import { visiblePosts, signedRows } from "../../utils/postContent.js";
 // routes/postsAndFeed.js
 import multer from "multer";
 import { authenticateUser } from "../../middleware/token.js";
@@ -18,7 +19,8 @@ function safeParseJSON(value, fallback = []) {
 
 export default function (app, supabase) {
   app.get("/feed", authenticateUser(supabase), upload.none(), async (req, res) => {
-    const { id:userId } = req.user;
+    res.set("Cache-Control", "no-store");
+    const userId = req.user?.id;
     if (!userId) return res.status(401).json({ success: false });
 
     try {
@@ -75,7 +77,7 @@ export default function (app, supabase) {
         .order("created_at", { ascending: false })
         .limit(100);
 
-      const safePosts = postsData || [];
+      const safePosts = await signedRows(supabase, await visiblePosts(supabase, postsData || [], req.user?.id), "media", "posts");
 
       // --- 8) пользователи
       const postUserIds = [...new Set(safePosts.map(p => p.user_id))];
@@ -130,7 +132,7 @@ export default function (app, supabase) {
           avatar_url: null
         };
 
-        const media = safeParseJSON(p.media, []);
+        const media = p.media;
         const likes = safeParseJSON(p.likes, []);
 
         const habit = p.habit_id ? (habitById[p.habit_id] || null) : null;
@@ -142,6 +144,8 @@ export default function (app, supabase) {
           media,
           habit,
           text: p.text ?? "",
+          content: p.content ?? null,
+          visibility: p.visibility ?? "inherit",
           likes,
           created_at: p.created_at,
           comments_count: p.comments_count ?? 0,
@@ -156,8 +160,9 @@ export default function (app, supabase) {
     }
   });
 
-  app.get("/posts/:nick", upload.none(), async (req, res) => {
+  app.get("/posts/:nick", authenticateUser(supabase), upload.none(), async (req, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const { nick } = req.params; // user id
 
       const { data: acc, error: accError } = await supabase
@@ -178,7 +183,7 @@ export default function (app, supabase) {
         .order("created_at", { ascending: false });
 
       if (postsErr) throw postsErr;
-      const safePosts = Array.isArray(postsData) ? postsData : [];
+      const safePosts = await signedRows(supabase, await visiblePosts(supabase, postsData || [], req.user?.id), "media", "posts");
 
       // подгружаем автора (можно взять один раз — все посты одного user_id)
       let author = null;
@@ -211,7 +216,7 @@ export default function (app, supabase) {
       }
 
       const posts = safePosts.map(p => {
-        const media = safeParseJSON(p.media, []);
+        const media = p.media;
         const likes = safeParseJSON(p.likes, []);
 
         const habit = p.habit_id ? (habitById[String(p.habit_id)] || null) : null;
@@ -222,6 +227,8 @@ export default function (app, supabase) {
           media,
           habit,
           text: p.text ?? "",
+          content: p.content ?? null,
+          visibility: p.visibility ?? "inherit",
           likes,
           created_at: p.created_at,
           comments_count: typeof p.comments_count !== "undefined" ? p.comments_count : 0,

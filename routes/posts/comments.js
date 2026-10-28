@@ -1,12 +1,16 @@
+import { authenticateUser } from "../../middleware/token.js";
+import { readablePost, signedRows } from "../../utils/postContent.js";
 import multer from "multer";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 export default function (app, supabase) {
-    app.get("/comments/:id", upload.none(), async (req, res) => {
+    app.get("/comments/:id", authenticateUser(supabase), upload.none(), async (req, res) => {
+        res.set("Cache-Control", "no-store");
         const postId = req.params.id;
 
         try {
+            if (!await readablePost(supabase, postId, req.user?.id)) return res.status(404).json({ success: false });
             // Получаем комментарии с id пользователя
             const { data: commentsData, error: commentsError } = await supabase
                 .from("posts_comments")
@@ -38,10 +42,9 @@ export default function (app, supabase) {
             }
 
             // Сопоставляем пользователей с комментариями
-            const comments = commentsData.map(c => ({
-                ...c,
-                files: typeof c.files === "string" ? JSON.parse(c.files) : c.files || [],
-                user: usersData.find(u => u.id === c.user_id) || null,
+            const signed = await signedRows(supabase, commentsData, "files", "comments");
+            const comments = signed.map(c => ({
+                ...c,                user: usersData.find(u => u.id === c.user_id) || null,
             }));
 
             res.json({ success: true, comments });
