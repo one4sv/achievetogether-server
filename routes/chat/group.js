@@ -1,3 +1,4 @@
+import { inviteGroupUsers, personalInvitation, invitationError } from "../../services/groupInvitations.js";
 import { authenticateUser } from "../../middleware/token.js";
 import multer from "multer"; // ← добавьте импорт
 import crypto from "crypto";
@@ -178,7 +179,8 @@ export default function (app, supabase) {
       return res.status(500).json({ success: false, error: "Ошибка сервера" });
     }
   })
-  app.get("/group/invite/:token", async (req, res) => {
+  app.get("/group/invite/:token", authenticateUser(supabase), async (req, res) => {
+    if (req.params.token.startsWith("i_")) return personalInvitation(supabase, req, res);
     try {
       const { token } = req.params;
 
@@ -218,6 +220,8 @@ export default function (app, supabase) {
     }
   });
   app.post("/group/join", authenticateUser(supabase), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Войдите в аккаунт" });
+    if (typeof req.body.token === "string" && req.body.token.startsWith("i_")) return personalInvitation(supabase, req, res, true);
     try {
       const userId = req.user.id;
       const { token } = req.body;
@@ -321,133 +325,18 @@ export default function (app, supabase) {
   });
 
   app.post("/group/addusers", authenticateUser(supabase), uploadNone.none(), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Войдите в аккаунт" });
+    const groupId = Number(req.body.group_id);
+    if (!Number.isSafeInteger(groupId) || groupId <= 0) return res.status(400).json({ success: false, error: "Некорректная беседа" });
+    let members;
+    try { members = JSON.parse(req.body.members); } catch {
+      return res.status(400).json({ success: false, error: "Некорректный список участников" });
+    }
     try {
-      const userId = req.user.id;
-      let { group_id: groupIdRaw, members: membersJson } = req.body;
-
-      const groupId = parseInt(groupIdRaw, 10);
-      if (isNaN(groupId)) return res.status(400).json({ success: false, error: "Некорректный group_id" });
-
-      if (!(await hasServerPermission(supabase, groupId, userId, PERMS.can_invite_users))) {
-        return res.status(403).json({ success: false, error: "У вас нет прав на добавление участников" });
-      }
-
-      let memberIds = [];
-      try {
-        memberIds = JSON.parse(membersJson);
-        if (!Array.isArray(memberIds) || memberIds.length === 0) {
-          return res.status(400).json({ success: false, error: "Список участников пустой или некорректный" });
-        }
-      } catch (err) {
-        return res.status(400).json({ success: false, error: "Некорректный формат members" });
-      }
-
-      // Подгружаем имя админа (inviter)
-      const { data: inviterInfo, error: inviterError } = await supabase
-        .from("users")
-        .select("username, nick")
-        .eq("id", userId)
-        .single();
-
-      if (inviterError || !inviterInfo) {
-        console.error("[addusers] Не удалось получить данные админа:", inviterError);
-        return res.status(500).json({ success: false, error: "Ошибка получения данных пользователя" });
-      }
-
-      const inviterName = inviterInfo.username || inviterInfo.nick || "Администратор";
-      const inviterNick = inviterInfo.nick;
-
-      const { data: chat } = await supabase
-        .from("chats")
-        .select("default_role_id")
-        .eq("id", groupId)
-        .single();
-      // Проверка пользователей (добавляем username в select)
-      const { data: usersToAdd, error: usersError } = await supabase
-        .from("users")
-        .select("id, username, nick")
-        .in("id", memberIds);
-
-      if (usersError || !usersToAdd || usersToAdd.length !== memberIds.length) {
-        return res.status(404).json({ success: false, error: "Один или несколько пользователей не найдены" });
-      }
-
-      // Уже в группе?
-      const { data: existingMembers } = await supabase
-        .from("chat_members")
-        .select("user_id")
-        .eq("chat_id", groupId)
-        .in("user_id", memberIds);
-
-      const existingIds = new Set(existingMembers?.map(m => m.user_id) || []);
-
-      const newMembers = usersToAdd.filter(u => !existingIds.has(u.id));
-
-      if (newMembers.length === 0) {
-        return res.json({ success: true, added: 0, message: "Все выбранные пользователи уже в группе" });
-      }
-
-      // Добавляем
-      const inserts = newMembers.map(u => ({
-        chat_id: groupId,
-        user_id: u.id,
-        joined_at: new Date().toISOString(),
-        role_id:chat.default_role_id
-      }));
-
-      const { error: insertError } = await supabase
-        .from("chat_members")
-        .insert(inserts);
-
-      if (insertError) {
-        console.error("[addusers] insert error:", insertError);
-        return res.status(500).json({ success: false, error: "Не удалось добавить участников" });
-      }
-
-      // Системные сообщения для каждого добавленного
-      for (const u of newMembers) {
-        const { data: sysMsgRaw, error:sysMsgError } = await supabase
-          .from("messages")
-          .insert({
-            chat_id: groupId,
-            sender_id: userId,
-            content: `добавил {} в беседу`,
-            is_system: true,
-            created_at: new Date().toISOString(),
-            target_id:u.id
-          })
-          .select("*")
-          .single();
-
-        if (sysMsgError || !sysMsgRaw) {
-          console.log("sysMsgError", sysMsgError)
-          return res.status(500).json({ success: false, error: "Не удалось отправить сис. уведомления" });
-        }
-        if (sysMsgRaw) {
-          const sysMsg = {
-            ...sysMsgRaw,
-            sender_name: inviterName,
-            sender_nick: inviterNick,
-            files: [],
-            reactions: [],
-            read_by: [],
-            edited: false,
-            is_system: true,
-            is_pinned: false,
-          };
-
-          broadcastNewMessage(groupId, sysMsg);
-        }
-      }
-
-      broadcastGroupUpdated(groupId);
-
-      return res.json({ success: true, added: newMembers.length });
-    } catch (err) {
-      console.error("[addusers] unexpected error:", err);
-      return res.status(500).json({ success: false, error: "Ошибка сервера" });
+      const result = await inviteGroupUsers(supabase, req.user.id, groupId, members);
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      return invitationError(res, error);
     }
   });
 }
-
-

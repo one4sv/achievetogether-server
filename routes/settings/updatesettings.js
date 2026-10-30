@@ -5,10 +5,23 @@ export default function (app, supabase) {
         const setting = Object.keys(req.body)[0];
         const value = req.body[setting];
 
-        const { id } = req.user;
+        const id = req.user?.id;
         if (!id) return res.status(401).json({ error: 'User not authenticated' });
 
         try {
+            if (setting === "group_invites") {
+                const modes = ["direct", "message", "none"];
+                if (!value || typeof value !== "object" || !modes.includes(value.contacts) || !modes.includes(value.others)) {
+                    return res.status(400).json({ success: false, error: "Некорректные правила приглашений" });
+                }
+                const { error } = await supabase.from("settings").upsert({
+                    user_id: id,
+                    group_invite_contacts: value.contacts,
+                    group_invite_others: value.others,
+                }, { onConflict: "user_id" });
+                if (error) throw error;
+                return res.json({ success: true });
+            }
             if (['order', 'show_archived', 'show_archived_in_acc', 'private', "week_start"].includes(setting)) {
                 const { error } = await supabase
                     .from('settings')

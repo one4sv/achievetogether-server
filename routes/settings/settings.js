@@ -60,6 +60,7 @@ export default function (app, supabase) {
                 success: true,
                 order: data.order,
                 private: data.private,
+                group_invites: { contacts: data.group_invite_contacts ?? "message", others: data.group_invite_others ?? "none" },
                 bg_url: data.bg_url,
                 twoAuth: data.two_auth,
                 show_archived: data.show_archived,

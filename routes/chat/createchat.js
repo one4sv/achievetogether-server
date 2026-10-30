@@ -1,3 +1,4 @@
+import { inviteGroupUsers, validUserIds } from "../../services/groupInvitations.js";
 // createchat route (исправленный и доработанный)
 import { authenticateUser } from "../../middleware/token.js";
 import multer from "multer";
@@ -27,6 +28,7 @@ export default function (app, supabase) {
     });
   }, async (req, res) => {
     try {
+      if (!req.user?.id) return res.status(401).json({ success: false, error: "Войдите в аккаунт" });
       const { id: creatorId } = req.user;
       const { name, desc, members } = req.body;
       const avatarFile = req.file;
@@ -38,19 +40,22 @@ export default function (app, supabase) {
       let parsedMembers = [];
       try {
         parsedMembers = JSON.parse(members || "[]");
-        if (!Array.isArray(parsedMembers) || parsedMembers.length < 1) {
+        if (!validUserIds(parsedMembers)) {
           return res.status(400).json({ success: false, error: "Выберите хотя бы одного участника" });
         }
       } catch (err) {
         return res.status(400).json({ success: false, error: "Некорректный список участников" });
       }
 
+      parsedMembers = [...new Set(parsedMembers)].filter(id => id !== creatorId);
+      if (!parsedMembers.length) return res.status(400).json({ success: false, error: "Выберите другого участника" });
+
       const { data: existingUsers, error: usersError } = await supabase
         .from("users")
         .select("id")
         .in("id", parsedMembers);
 
-      if (usersError || existingUsers.length !== parsedMembers.length) {
+      if (usersError || !existingUsers || existingUsers.length !== parsedMembers.length) {
         return res.status(404).json({ success: false, error: "Один или несколько участников не найдены" });
       }
 
@@ -169,11 +174,15 @@ export default function (app, supabase) {
       // Устанавливаем default роль
       await supabase
         .from("chats")
-        .update({ default_role_id: defaultRole.id })
+        .update({ default_role_id: defaultRole?.id })
         .eq("id", chatId);
 
       // Добавляем участников
-      const allMemberIds = [...new Set([creatorId, ...parsedMembers])];
+      if (!defaultRole || !ownerRole) {
+        await supabase.from("chats").delete().eq("id", chatId);
+        throw new Error("Не удалось создать роли беседы");
+      }
+      const allMemberIds = [creatorId];
 
       const chatMembersInserts = allMemberIds.map(userId => ({
         chat_id: chatId,
@@ -198,7 +207,14 @@ export default function (app, supabase) {
         is_system: true,
       });
 
-      res.json({ success: true, chat_id: chatId });
+      let invitations;
+      try {
+        invitations = await inviteGroupUsers(supabase, creatorId, chatId, parsedMembers);
+      } catch (error) {
+        await supabase.from("chats").delete().eq("id", chatId);
+        throw error;
+      }
+      res.json({ success: true, chat_id: chatId, ...invitations });
     } catch (err) {
       console.error("[createchat] Ошибка:", err);
       res.status(500).json({ success: false, error: "Ошибка сервера", detail: err.message });
