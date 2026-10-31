@@ -160,6 +160,17 @@ export default function (app, supabase) {
         }
 
         try {
+            const { data: activity, error: activityError } = await supabase.from("habits")
+                .select("id, user_id, members_can_edit_blocks").eq("id", habit_id).maybeSingle();
+            if (activityError) throw activityError;
+            if (!activity) return res.status(404).json({ success: false });
+            if (activity.user_id !== req.user.id) {
+                const { data: member, error: memberError } = await supabase.from("habit_members")
+                    .select("status").eq("habit_id", habit_id).eq("user_id", req.user.id)
+                    .eq("status", "accepted").maybeSingle();
+                if (memberError) throw memberError;
+                if (!member || !activity.members_can_edit_blocks) return res.status(403).json({ success: false, error: "Нет прав менять блоки" });
+            }
             await supabase
                 .from("schedule_settings")
                 .upsert({
@@ -169,21 +180,13 @@ export default function (app, supabase) {
                     onConflict: "habit_id"
                 });
                 
-            const { data: habit } = await supabase
-                .from("habits")
-                .select("id")
-                .eq("id", habit_id)
-                .eq("user_id", req.user.id)
-                .single();
-
-            if (!habit) return res.status(403).json({ success: false, error: "Нет доступа к привычке" });
-
             for (const block of blocks) {
                 if (block.id && !block.name.trim()) {
                     await supabase
                         .from("schedule")
                         .delete()
                         .eq("id", block.id)
+                        .eq("habit_id", habit_id)
 
                     continue
                 }
@@ -199,6 +202,7 @@ export default function (app, supabase) {
                             end_time: block.end_time || null
                         })
                         .eq("id", block.id)
+                        .eq("habit_id", habit_id)
 
                 } else if (block.name.trim()) {
 
