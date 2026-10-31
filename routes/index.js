@@ -7,6 +7,7 @@ import userRoutes from "./users/user.js";
 import logoutRoutes from "./auth/logout.js";
 import addhabitRoutes from "./habits/addhabit.js";
 import habitsRoutes from "./habits/habits.js";
+import habitMembersRoutes from "./habits/members.js";
 import settingsRoutes from "./settings/settings.js";
 import updatesettingsRoutes from "./settings/updatesettings.js";
 import updatehabitRoutes from "./habits/updatehabit.js";
@@ -58,6 +59,7 @@ export default function registerAllRoutes(app, supabase) {
     userRoutes(app, supabase);
     addhabitRoutes(app, supabase);
     habitsRoutes(app, supabase);
+    habitMembersRoutes(app, supabase);
     settingsRoutes(app, supabase);
     updatesettingsRoutes(app, supabase);
     updatehabitRoutes(app, supabase);
