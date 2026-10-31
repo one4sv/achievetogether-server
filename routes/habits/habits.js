@@ -43,7 +43,7 @@ export default function (app, supabase) {
             const { data: completionsArr, error: completionsError } = await withRetry(() =>
                 supabase
                     .from("habit_completions")
-                    .select("habit_id")
+                    .select("habit_id, user_id")
                     .eq("user_id", userId)
                     .eq("completed_at", today)
             );
@@ -53,7 +53,19 @@ export default function (app, supabase) {
                 return res.status(500).json({ success: false, error: "Ошибка получения выполнений" });
             }
 
-            const doneSet = new Set(completionsArr?.map(c => c.habit_id) || []);
+            const sharedHabits = habitsArr.filter(h => h.metric_progress_mode === "shared" && h.user_id !== userId);
+            let sharedCompletions = [];
+            if (sharedHabits.length) {
+                const { data, error } = await supabase.from("habit_completions")
+                    .select("habit_id, user_id")
+                    .in("habit_id", sharedHabits.map(h => h.id))
+                    .in("user_id", [...new Set(sharedHabits.map(h => h.user_id))])
+                    .eq("completed_at", today);
+                if (error) throw error;
+                sharedCompletions = data || [];
+            }
+            const doneSet = new Set([...(completionsArr || []), ...sharedCompletions]
+                .map(c => `${c.habit_id}:${c.user_id}`));
 
             const habitsWithDone = habitsArr.map(habit => {
                 const settings = habit.habits_settings?.[0] || null;
@@ -61,7 +73,7 @@ export default function (app, supabase) {
                 return {
                     ...habit,
                     settings,
-                    done: doneSet.has(habit.id),
+                    done: doneSet.has(`${habit.id}:${habit.metric_progress_mode === "shared" ? habit.user_id : userId}`),
                     isOwner: habit.user_id === userId,
                 };
             });
@@ -154,6 +166,7 @@ export default function (app, supabase) {
             const startOfDay = new Date(`${today}T00:00:00+03:00`).toISOString();
             const endOfDay = new Date(new Date(startOfDay).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
+            const progressUserId = habit.metric_progress_mode === "shared" ? habit.user_id : currentUserId;
             let isDone = false;
             let comment = "";
 
@@ -163,7 +176,7 @@ export default function (app, supabase) {
                         .from("habit_completions")
                         .select("id")
                         .eq("habit_id", habitId)
-                        .eq("user_id", currentUserId)
+                        .eq("user_id", progressUserId)
                         .eq("completed_at", today)
                         .maybeSingle()
                 );
@@ -202,7 +215,7 @@ export default function (app, supabase) {
                         .from("habit_timers")
                         .select("id, started_at, end_at, status, pauses, circles")
                         .eq("habit_id", habitId)
-                        .eq("user_id", currentUserId || habit.user_id)
+                        .eq("user_id", progressUserId || habit.user_id)
                         .gte("started_at", startOfDay)
                         .lt("started_at", endOfDay)
                         .order("started_at", { ascending: false })
@@ -234,7 +247,7 @@ export default function (app, supabase) {
                         .from("habit_counters")
                         .select("id, created_at, count, progression, min_count")
                         .eq("habit_id", habitId)
-                        .eq("user_id", currentUserId || habit.user_id)
+                        .eq("user_id", progressUserId || habit.user_id)
                         .gte("created_at", startOfDay)
                         .lt("created_at", endOfDay)
                         .order("created_at", { ascending: false })
