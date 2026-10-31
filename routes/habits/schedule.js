@@ -115,20 +115,14 @@ export default function (app, supabase) {
         if (isNaN(habitId)) return res.status(400).json({ success: false, error: "Неверный ID привычки" });
 
         try {
-            const { data: habit, error: habitError } = await supabase
-                .from("habits")
-                .select("id")
-                .eq("id", habitId)
-                .single();
-
-            if (habitError || !habit) {
-                return res.status(habitError ? 500 : 404).json({ success: false, error: habitError ? "Ошибка БД" : "Привычка не найдена" });
-            }
+            const access = await habitAccess(habitId, req.user.id);
+            if (!access) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
 
             const { data: blocks, error } = await supabase
                 .from("schedule")
                 .select("id, day_of_week, isSeparator, name, start_time, end_time")
                 .eq("habit_id", habitId)
+                .eq("user_id", blockUserId(access, req.user.id))
                 .order("day_of_week")
                 .order("created_at");
 
