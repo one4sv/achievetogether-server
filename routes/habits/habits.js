@@ -283,6 +283,7 @@ export default function (app, supabase) {
                         .from("checklist_completions")
                         .select("id, name, start_time, end_time, date, habit_id")
                         .eq("habit_id", habitId)
+                        .eq("user_id", currentUserId || habit.user_id)
                         .order("start_time", { ascending: true })
                 );
 
