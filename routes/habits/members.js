@@ -167,10 +167,16 @@ export default function (app, supabase) {
         if (typeof userId !== "string" && (typeof nick !== "string" || !nick.trim())) return res.status(400).json({ success: false });
         try {
             const { data: habit, error: habitError } = await supabase.from("habits")
-                .select("id, user_id").eq("id", req.params.id).maybeSingle();
+                .select("id, user_id, members_can_invite").eq("id", req.params.id).maybeSingle();
             if (habitError) throw habitError;
             if (!habit) return res.status(404).json({ success: false });
-            if (habit.user_id !== req.user.id) return res.status(403).json({ success: false });
+            if (habit.user_id !== req.user.id) {
+                const { data: member, error: memberError } = await supabase.from("habit_members")
+                    .select("status").eq("habit_id", habit.id).eq("user_id", req.user.id)
+                    .eq("status", "accepted").maybeSingle();
+                if (memberError) throw memberError;
+                if (!habit.members_can_invite || !member) return res.status(403).json({ success: false, error: "У вас нет прав приглашать в активность" });
+            }
             const lookup = supabase.from("users").select("id");
             const { data: target, error: targetError } = await (typeof userId === "string"
                 ? lookup.eq("id", userId) : lookup.eq("nick", nick.trim())).maybeSingle();
