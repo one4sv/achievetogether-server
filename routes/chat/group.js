@@ -204,6 +204,9 @@ export default function (app, supabase) {
         .select("id", { count: "exact" })
         .eq("chat_id", group.id);
 
+      const { data: activities, error: activitiesError } = await supabase.from("habits")
+        .select("id, name, chat_participation_mode").eq("chat_id", group.id).eq("ongoing", true);
+      if (activitiesError) throw activitiesError;
       res.json({
         success: true,
         group: {
@@ -213,6 +216,7 @@ export default function (app, supabase) {
           desc: group.desc || null,
           member_count: memberCount || 0,
         },
+        activities: activities || [],
       });
     } catch (err) {
       console.error("[invite info] error:", err);
@@ -256,6 +260,18 @@ export default function (app, supabase) {
       if (existing) {
         return res.json({ success: true, already_member: true, chat_id: chatId });
       }
+      const { data: requiredActivities, error: activitiesError } = await supabase.from("habits")
+        .select("id").eq("chat_id", chatId).eq("ongoing", true).eq("chat_participation_mode", "required");
+      if (activitiesError) throw activitiesError;
+      const { data: alreadyAccepted, error: memberError } = requiredActivities?.length
+        ? await supabase.from("habit_members").select("habit_id")
+          .eq("user_id", userId).in("habit_id", requiredActivities.map(item => item.id))
+        : { data: [], error: null };
+      if (memberError) throw memberError;
+      const acceptedIds = new Set((alreadyAccepted || []).map(item => item.habit_id));
+      const newMemberships = (requiredActivities || []).filter(item => !acceptedIds.has(item.id))
+        .map(item => ({ habit_id: item.id, user_id: userId, invited_by: userId, status: "accepted" }));
+
 
       const { error: joinError } = await supabase
         .from("chat_members")
@@ -269,6 +285,15 @@ export default function (app, supabase) {
       if (joinError) {
         console.error("[join] error:", joinError);
         return res.status(500).json({ success: false, error: "Не удалось вступить" });
+      }
+
+      if (newMemberships.length) {
+        const { error: attachError } = await supabase.from("habit_members")
+          .upsert(newMemberships, { onConflict: "habit_id,user_id" });
+        if (attachError) {
+          await supabase.from("chat_members").delete().eq("chat_id", chatId).eq("user_id", userId);
+          throw attachError;
+        }
       }
 
       // Подгружаем имя присоединившегося
