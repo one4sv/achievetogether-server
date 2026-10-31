@@ -247,12 +247,18 @@ export default function (app, supabase) {
           }))
       ];
 
+      const { data: progressSettings, error: progressError } = await supabase.from("habits")
+        .select("user_id, metric_progress_mode").eq("id", habitId).single();
+      if (progressError) throw progressError;
+      const progressUserId = progressSettings.metric_progress_mode === "shared"
+        ? progressSettings.user_id : req.user.id;
+
       // Все исторические таймеры привычки
       const { data: timersData, error: timersError } = await supabase
         .from("habit_timers")
         .select("id, started_at, end_at, status, pauses, circles")
         .eq("habit_id", habitId)
-        .eq("user_id", req.user.id)
+        .eq("user_id", progressUserId)
         .order("started_at", { ascending: false });
 
       if (timersError) {
@@ -263,7 +269,7 @@ export default function (app, supabase) {
         .from("habit_counters")
         .select("id, created_at, count, progression, min_count")
         .eq("habit_id", habitId)
-        .eq("user_id", req.user.id)
+        .eq("user_id", progressUserId)
         .order("created_at", { ascending: false });
 
       if (countersError) {
