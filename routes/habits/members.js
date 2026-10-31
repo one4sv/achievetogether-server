@@ -1,6 +1,26 @@
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
+    app.patch("/habits/:id/chat-mode", authenticateUser(supabase), async (req, res) => {
+        const mode = req.body?.mode;
+        if (!["required", "optional"].includes(mode)) return res.status(400).json({ success: false });
+        try {
+            const { data: habit, error: findError } = await supabase.from("habits")
+                .select("id, user_id, chat_id").eq("id", req.params.id).maybeSingle();
+            if (findError) throw findError;
+            if (!habit) return res.status(404).json({ success: false });
+            if (habit.user_id !== req.user?.id) return res.status(403).json({ success: false });
+            if (!habit.chat_id) return res.status(409).json({ success: false, error: "Сначала привяжите беседу" });
+            const { error } = await supabase.from("habits").update({ chat_participation_mode: mode })
+                .eq("id", habit.id).eq("user_id", req.user.id);
+            if (error) throw error;
+            return res.json({ success: true, mode });
+        } catch (error) {
+            console.error("Ошибка режима совместной активности:", error);
+            return res.status(500).json({ success: false });
+        }
+    });
+
     app.patch("/habits/:id/chat", authenticateUser(supabase), async (req, res) => {
         const userId = req.user?.id;
         const chatId = req.body?.chat_id;
