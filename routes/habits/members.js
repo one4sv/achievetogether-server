@@ -23,6 +23,11 @@ export default function (app, supabase) {
                 .select("id, user_id, completed_at, created_at").eq("habit_id", habit.id)
                 .in("user_id", userIds).order("created_at", { ascending: false }).limit(150);
             if (completionError) throw completionError;
+            const { data: auditEvents, error: auditError } = await supabase.from("habit_activity_events")
+                .select("id, user_id, type, created_at").eq("habit_id", habit.id)
+                .order("created_at", { ascending: false }).limit(150);
+            if (auditError) throw auditError;
+            for (const item of auditEvents || []) if (item.user_id && !userIds.includes(item.user_id)) userIds.push(item.user_id);
             const { data: users, error: usersError } = await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", userIds);
             if (usersError) throw usersError;
@@ -33,8 +38,8 @@ export default function (app, supabase) {
                     user: byId.get(item.user_id) || null, date: item.completed_at,
                     created_at: item.created_at
                 })),
-                ...(members || []).filter(m => m.status === "accepted").map(item => ({
-                    id: `member-${item.user_id}`, type: "joined", user_id: item.user_id,
+                ...(auditEvents || []).map(item => ({
+                    id: `audit-${item.id}`, type: item.type, user_id: item.user_id,
                     user: byId.get(item.user_id) || null, created_at: item.created_at
                 }))
             ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0,150);
