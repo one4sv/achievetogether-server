@@ -188,8 +188,7 @@ export default function (app, supabase) {
       const { data: planned, error: plannedError } = await supabase
         .from("habit_planned")
         .select("planned_at")
-        .eq("habit_id", habitId)
-        .eq("user_id", req.user.id);
+        .eq("habit_id", habitId);
 
       if (plannedError) {
         console.log(plannedError);
