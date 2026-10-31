@@ -12,6 +12,12 @@ export default function(app, supabase) {
             .eq("status", "accepted").maybeSingle();
         return !memberError && !!member;
     };
+    const metricUser = async (habitId, userId) => {
+        const { data: habit, error } = await supabase.from("habits")
+            .select("user_id, metric_progress_mode").eq("id", habitId).maybeSingle();
+        if (error || !habit) throw error || new Error("Activity not found");
+        return habit.metric_progress_mode === "shared" ? habit.user_id : userId;
+    };
     app.get("/timer/:habit_id", authenticateUser(supabase), async (req, res) => {
         const { id: userId } = req.user;
         const habitId = parseInt(req.params.habit_id);
@@ -22,6 +28,7 @@ export default function(app, supabase) {
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
+            const progressUserId = await metricUser(habitId, userId);
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
@@ -36,7 +43,7 @@ export default function(app, supabase) {
                 .from("habit_timers")
                 .select("id, started_at, end_at, status, pauses, circles")
                 .eq("habit_id", habitId)
-                .eq("user_id", userId)
+                .eq("user_id", progressUserId)
                 .lte("started_at", endOfDay)
                 .gte("end_at", startOfDay)
                 .order("started_at", { ascending: false })
@@ -75,6 +82,7 @@ export default function(app, supabase) {
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
+            const progressUserId = await metricUser(habitId, userId);
             const startedAt = new Date(time);
             const { data: habit } = await supabase.from("habits").select("id, end_time").eq("id", habitId).single();
 
@@ -84,7 +92,7 @@ export default function(app, supabase) {
 
             if (timerId) {
                 // RESUME
-                const { data: timerData } = await supabase.from("habit_timers").select("*").eq("id", timerId).eq("user_id", userId).eq("habit_id", habitId).single();
+                const { data: timerData } = await supabase.from("habit_timers").select("*").eq("id", timerId).eq("user_id", progressUserId).eq("habit_id", habitId).single();
                 if (!timerData || timerData.status !== "paused") return res.status(400).json({ success: false, error: "Таймер не на паузе" });
 
                 const pauses = [...(timerData.pauses || [])];
@@ -96,7 +104,7 @@ export default function(app, supabase) {
 
                 pauses[last].end = startedAt.toISOString();
 
-                await supabase.from("habit_timers").update({ status: "running", pauses, end_at: newEndAt.toISOString() }).eq("id", timerId).eq("user_id", userId);
+                await supabase.from("habit_timers").update({ status: "running", pauses, end_at: newEndAt.toISOString() }).eq("id", timerId).eq("user_id", progressUserId);
                 timerIdToUse = timerId;
             } else {
                 // NEW TIMER
@@ -106,7 +114,7 @@ export default function(app, supabase) {
                 if (endDate < startedAt) endDate.setDate(endDate.getDate() + 1);
 
                 const { data: newTimer } = await supabase.from("habit_timers")
-                    .insert({ habit_id: habitId, user_id: userId, started_at: startedAt.toISOString(), end_at: endDate.toISOString(), status: "running", pauses: [], circles: [] })
+                    .insert({ habit_id: habitId, user_id: progressUserId, started_at: startedAt.toISOString(), end_at: endDate.toISOString(), status: "running", pauses: [], circles: [] })
                     .select("id").single();
 
                 timerIdToUse = newTimer.id;
@@ -116,7 +124,7 @@ export default function(app, supabase) {
             const { data: updatedTimer } = await supabase
                 .from("habit_timers")
                 .select("id, started_at, end_at, status, pauses, circles")
-                .eq("id", timerIdToUse).eq("user_id", userId)
+                .eq("id", timerIdToUse).eq("user_id", progressUserId)
                 .single();
 
             if (updatedTimer) broadcastTimerUpdate(userId, habitId, updatedTimer);
@@ -136,17 +144,18 @@ export default function(app, supabase) {
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
+            const progressUserId = await metricUser(habitId, userId);
             const pauseTime = new Date(time);
-            const { data: timerData } = await supabase.from("habit_timers").select("*").eq("id", timerId).eq("user_id", userId).eq("habit_id", habitId).single();
+            const { data: timerData } = await supabase.from("habit_timers").select("*").eq("id", timerId).eq("user_id", progressUserId).eq("habit_id", habitId).single();
 
             if (!timerData || timerData.status !== "running") return res.status(400).json({ success: false, error: "Таймер не запущен" });
 
             const pauses = [...(timerData.pauses || [])];
             pauses.push({ start: pauseTime.toISOString(), time: time, end: null });
 
-            await supabase.from("habit_timers").update({ status: "paused", pauses }).eq("id", timerId).eq("user_id", userId);
+            await supabase.from("habit_timers").update({ status: "paused", pauses }).eq("id", timerId).eq("user_id", progressUserId);
 
-            const { data: updatedTimer } = await supabase.from("habit_timers").select("id, started_at, end_at, status, pauses, circles").eq("id", timerId).eq("user_id", userId).single();
+            const { data: updatedTimer } = await supabase.from("habit_timers").select("id, started_at, end_at, status, pauses, circles").eq("id", timerId).eq("user_id", progressUserId).single();
             if (updatedTimer) broadcastTimerUpdate(userId, habitId, updatedTimer);
 
             res.json({ success: true });
@@ -169,6 +178,7 @@ export default function(app, supabase) {
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
+            const progressUserId = await metricUser(habitId, userId);
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
@@ -182,7 +192,7 @@ export default function(app, supabase) {
             const { data: timerData, error: timerError } = await supabase
                 .from("habit_timers")
                 .select("*")
-                .eq("id", timerId).eq("user_id", userId)
+                .eq("id", timerId).eq("user_id", progressUserId)
                 .eq("habit_id", habitId)
                 .single();
 
@@ -209,7 +219,7 @@ export default function(app, supabase) {
                     end_at: stopTime.toISOString(),
                     pauses
                 })
-                .eq("id", timerId).eq("user_id", userId);
+                .eq("id", timerId).eq("user_id", progressUserId);
 
             if (updateError) {
                 throw updateError;
@@ -251,7 +261,7 @@ export default function(app, supabase) {
                         .update({
                             done_id: completionId
                         })
-                        .eq("id", timerId).eq("user_id", userId);
+                        .eq("id", timerId).eq("user_id", progressUserId);
 
                     if (updateTimerError) {
                         console.error("Ошибка обновления done_id в таймере:", updateTimerError);
@@ -261,7 +271,7 @@ export default function(app, supabase) {
             const { data: updatedTimer, error: fetchError } = await supabase
                 .from("habit_timers")
                 .select("id, started_at, end_at, status, pauses, circles")
-                .eq("id", timerId).eq("user_id", userId)
+                .eq("id", timerId).eq("user_id", progressUserId)
                 .single();
 
             if (!fetchError && updatedTimer) {
@@ -286,6 +296,7 @@ export default function(app, supabase) {
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
+            const progressUserId = await metricUser(habitId, userId);
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
@@ -299,7 +310,7 @@ export default function(app, supabase) {
             const { data: timerData, error: timerError } = await supabase
                 .from("habit_timers")
                 .select("*")
-                .eq("id", timerId).eq("user_id", userId)
+                .eq("id", timerId).eq("user_id", progressUserId)
                 .eq("habit_id", habitId)
                 .single();
 
@@ -317,7 +328,7 @@ export default function(app, supabase) {
             const { error: updateError } = await supabase
                 .from("habit_timers")
                 .update({ circles })
-                .eq("id", timerId).eq("user_id", userId);
+                .eq("id", timerId).eq("user_id", progressUserId);
 
             if (updateError) {
                 throw updateError;
@@ -325,7 +336,7 @@ export default function(app, supabase) {
             const { data: updatedTimer, error: fetchError } = await supabase
                 .from("habit_timers")
                 .select("id, started_at, end_at, status, pauses, circles")
-                .eq("id", timerId).eq("user_id", userId)
+                .eq("id", timerId).eq("user_id", progressUserId)
                 .single();
 
             if (!fetchError && updatedTimer) {
@@ -349,6 +360,7 @@ export default function(app, supabase) {
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
+            const progressUserId = await metricUser(habitId, userId);
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
@@ -362,7 +374,7 @@ export default function(app, supabase) {
             const { data: timerData, error: timerError } = await supabase
                 .from("habit_timers")
                 .select("*")
-                .eq("id", timerId).eq("user_id", userId)
+                .eq("id", timerId).eq("user_id", progressUserId)
                 .eq("habit_id", habitId)
                 .single();
 
@@ -387,7 +399,7 @@ export default function(app, supabase) {
             const { error: updateError } = await supabase
                 .from("habit_timers")
                 .update({ circles })
-                .eq("id", timerId).eq("user_id", userId);
+                .eq("id", timerId).eq("user_id", progressUserId);
 
             if (updateError) {
                 throw updateError;
@@ -396,7 +408,7 @@ export default function(app, supabase) {
             const { data: updatedTimer, error: fetchError } = await supabase
                 .from("habit_timers")
                 .select("id, started_at, end_at, status, pauses, circles")
-                .eq("id", timerId).eq("user_id", userId)
+                .eq("id", timerId).eq("user_id", progressUserId)
                 .single();
 
             if (!fetchError && updatedTimer) {
