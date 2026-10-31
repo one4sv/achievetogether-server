@@ -2,6 +2,16 @@ import { authenticateUser } from "../../middleware/token.js"
 import { broadcastTimerUpdate } from "../../realtime/ws.js"
 
 export default function(app, supabase) {
+    const canUseTimer = async (habitId, userId) => {
+        const { data: habit, error } = await supabase.from("habits")
+            .select("user_id").eq("id", habitId).maybeSingle();
+        if (error || !habit) return false;
+        if (habit.user_id === userId) return true;
+        const { data: member, error: memberError } = await supabase.from("habit_members")
+            .select("status").eq("habit_id", habitId).eq("user_id", userId)
+            .eq("status", "accepted").maybeSingle();
+        return !memberError && !!member;
+    };
     app.get("/timer/:habit_id", authenticateUser(supabase), async (req, res) => {
         const { id: userId } = req.user;
         const habitId = parseInt(req.params.habit_id);
@@ -11,11 +21,11 @@ export default function(app, supabase) {
         const endOfDay = new Date(new Date(startOfDay).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
         try {
+            if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
                 .eq("id", habitId)
-                .eq("user_id", userId)
                 .single();
 
             if (habitError || !habit) {
@@ -64,8 +74,9 @@ export default function(app, supabase) {
         if (!habitId || !time) return res.status(400).json({ success: false, error: "Не указан ID привычки или время" });
 
         try {
+            if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const startedAt = new Date(time);
-            const { data: habit } = await supabase.from("habits").select("id, end_time").eq("id", habitId).eq("user_id", userId).single();
+            const { data: habit } = await supabase.from("habits").select("id, end_time").eq("id", habitId).single();
 
             if (!habit) return res.status(404).json({ success: false, error: "Привычка не найдена" });
 
@@ -124,6 +135,7 @@ export default function(app, supabase) {
         if (!habitId || !time || !timerId) return res.status(400).json({ success: false, error: "Недостаточно данных" });
 
         try {
+            if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const pauseTime = new Date(time);
             const { data: timerData } = await supabase.from("habit_timers").select("*").eq("id", timerId).eq("user_id", userId).eq("habit_id", habitId).single();
 
@@ -156,11 +168,11 @@ export default function(app, supabase) {
         const todayMoscow = stopTime.toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
 
         try {
+            if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
                 .eq("id", habitId)
-                .eq("user_id", userId)
                 .single();
 
             if (habitError || !habit) {
@@ -273,11 +285,11 @@ export default function(app, supabase) {
         }
 
         try {
+            if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
                 .eq("id", habitId)
-                .eq("user_id", userId)
                 .single();
 
             if (habitError || !habit) {
@@ -336,11 +348,11 @@ export default function(app, supabase) {
         }
 
         try {
+            if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
                 .eq("id", habitId)
-                .eq("user_id", userId)
                 .single();
 
             if (habitError || !habit) {
