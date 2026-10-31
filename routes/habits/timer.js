@@ -18,6 +18,18 @@ export default function(app, supabase) {
         if (error || !habit) throw error || new Error("Activity not found");
         return habit.metric_progress_mode === "shared" ? habit.user_id : userId;
     };
+    const notifyTimer = async (habitId, userId, timer) => {
+        broadcastTimerUpdate(userId, habitId, timer);
+        const { data: habit, error } = await supabase.from("habits")
+            .select("user_id, metric_progress_mode").eq("id", habitId).maybeSingle();
+        if (error || habit?.metric_progress_mode !== "shared") return;
+        const { data: members, error: memberError } = await supabase.from("habit_members")
+            .select("user_id").eq("habit_id", habitId).eq("status", "accepted");
+        if (memberError) return;
+        const recipients = new Set([habit.user_id, ...(members || []).map(m => m.user_id)]);
+        recipients.delete(userId);
+        for (const id of recipients) broadcastTimerUpdate(id, habitId, timer);
+    };
     app.get("/timer/:habit_id", authenticateUser(supabase), async (req, res) => {
         const { id: userId } = req.user;
         const habitId = parseInt(req.params.habit_id);
@@ -127,7 +139,7 @@ export default function(app, supabase) {
                 .eq("id", timerIdToUse).eq("user_id", progressUserId)
                 .single();
 
-            if (updatedTimer) broadcastTimerUpdate(userId, habitId, updatedTimer);
+            if (updatedTimer) void notifyTimer(habitId, userId, updatedTimer);
 
             res.json({ success: true, timer_id: timerIdToUse });
         } catch (err) {
@@ -156,7 +168,7 @@ export default function(app, supabase) {
             await supabase.from("habit_timers").update({ status: "paused", pauses }).eq("id", timerId).eq("user_id", progressUserId);
 
             const { data: updatedTimer } = await supabase.from("habit_timers").select("id, started_at, end_at, status, pauses, circles").eq("id", timerId).eq("user_id", progressUserId).single();
-            if (updatedTimer) broadcastTimerUpdate(userId, habitId, updatedTimer);
+            if (updatedTimer) void notifyTimer(habitId, userId, updatedTimer);
 
             res.json({ success: true });
         } catch (err) {
@@ -275,7 +287,7 @@ export default function(app, supabase) {
                 .single();
 
             if (!fetchError && updatedTimer) {
-                broadcastTimerUpdate(userId, habitId, updatedTimer);
+                void notifyTimer(habitId, userId, updatedTimer);
                 res.json({ success: true, timer: updatedTimer });
             } else {
                 res.json({ success: true });
@@ -340,7 +352,7 @@ export default function(app, supabase) {
                 .single();
 
             if (!fetchError && updatedTimer) {
-                broadcastTimerUpdate(userId, habitId, updatedTimer);
+                void notifyTimer(habitId, userId, updatedTimer);
                 res.json({ success: true }); // возвращаем полный таймер
             } else {
             res.json({ success: true });
@@ -412,7 +424,7 @@ export default function(app, supabase) {
                 .single();
 
             if (!fetchError && updatedTimer) {
-                broadcastTimerUpdate(userId, habitId, updatedTimer);
+                void notifyTimer(habitId, userId, updatedTimer);
                 res.json({ success: true });
             } else {
             res.json({ success: true });
