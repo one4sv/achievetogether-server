@@ -95,6 +95,7 @@ export default function (app, supabase) {
         .from("habit_completions")
         .delete()
         .eq("habit_id", habit_id)
+        .eq("user_id", user_id)
         .eq("completed_at", today);
 
       if (error) throw error;
