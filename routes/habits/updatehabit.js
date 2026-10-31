@@ -22,7 +22,7 @@ export default function (app, supabase) {
         try {
             const { data: habit, error: habitError } = await supabase
                 .from('habits')
-                .select('user_id')
+.select('user_id, members_can_edit_info')
                 .eq('id', habit_id)
                 .single();
 
@@ -30,7 +30,15 @@ export default function (app, supabase) {
                 return res.status(404).json({ error: 'Habit not found' });
             }
             if (habit.user_id !== user_id) {
-                return res.status(403).json({ error: 'Access denied to this habit' });
+                const { data: member, error: memberError } = await supabase.from('habit_members')
+                    .select('status').eq('habit_id', habit_id).eq('user_id', user_id)
+                    .eq('status', 'accepted').maybeSingle();
+                if (memberError) throw memberError;
+                const infoFields = ['name', 'desc', 'tag'];
+                if (!member || !habit.members_can_edit_info || table !== 'habits' ||
+                    Object.keys(updateData).some(field => !infoFields.includes(field))) {
+                    return res.status(403).json({ error: 'Access denied to this habit' });
+                }
             }
 
             let validFields = [];
