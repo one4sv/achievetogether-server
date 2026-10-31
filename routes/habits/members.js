@@ -1,6 +1,34 @@
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
+    app.patch("/habits/:id/collaboration", authenticateUser(supabase), async (req, res) => {
+        const allowed = {
+            metric_progress_mode: ["personal", "shared"],
+            schedule_blocks_mode: ["personal", "shared"],
+            members_can_edit_blocks: [true, false],
+            members_can_edit_info: [true, false],
+            members_can_invite: [true, false]
+        };
+        const changes = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => Object.hasOwn(allowed, key)));
+        if (!Object.keys(changes).length || Object.entries(changes).some(([key, value]) => !allowed[key].includes(value))) {
+            return res.status(400).json({ success: false, error: "Некорректные настройки совместной активности" });
+        }
+        try {
+            const { data: habit, error: habitError } = await supabase.from("habits")
+                .select("id, user_id").eq("id", req.params.id).maybeSingle();
+            if (habitError) throw habitError;
+            if (!habit) return res.status(404).json({ success: false });
+            if (habit.user_id !== req.user?.id) return res.status(403).json({ success: false, error: "Нет прав изменять настройки" });
+            const { data, error } = await supabase.from("habits").update(changes)
+                .eq("id", habit.id).eq("user_id", req.user.id).select("*").single();
+            if (error) throw error;
+            return res.json({ success: true, habit: data });
+        } catch (error) {
+            console.error("Ошибка настроек совместной активности:", error);
+            return res.status(500).json({ success: false, error: "Не удалось сохранить настройки" });
+        }
+    });
+
     app.patch("/habits/:id/chat-mode", authenticateUser(supabase), async (req, res) => {
         const mode = req.body?.mode;
         if (!["required", "optional"].includes(mode)) return res.status(400).json({ success: false });
