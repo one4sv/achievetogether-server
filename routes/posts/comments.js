@@ -53,4 +53,60 @@ export default function (app, supabase) {
             res.status(500).json({ success: false, message: "Ошибка сервера" });
         }
     });
+    app.patch("/comments/:id", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        const text = req.body?.text;
+        if (typeof text !== "string" || !text.trim() || text.length > 10000) {
+            return res.status(400).json({ success: false, error: "Некорректный текст" });
+        }
+        try {
+            const { data: original, error: findError } = await supabase
+                .from("posts_comments")
+                .select("id, post_id, user_id")
+                .eq("id", req.params.id)
+                .maybeSingle();
+            if (findError) throw findError;
+            if (!original) return res.status(404).json({ success: false });
+            if (original.user_id !== req.user.id) return res.status(403).json({ success: false });
+            if (!await readablePost(supabase, original.post_id, req.user.id)) {
+                return res.status(404).json({ success: false });
+            }
+            const { data, error } = await supabase.from("posts_comments")
+                .update({ text: text.trim() })
+                .eq("id", original.id)
+                .eq("user_id", req.user.id)
+                .select("*")
+                .single();
+            if (error) throw error;
+            res.json({ success: true, comment: data });
+        } catch (error) {
+            console.error("Ошибка редактирования комментария:", error);
+            res.status(500).json({ success: false });
+        }
+    });
+
+    app.delete("/comments/:id", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        try {
+            const { data: original, error: findError } = await supabase
+                .from("posts_comments")
+                .select("id, post_id, user_id")
+                .eq("id", req.params.id)
+                .maybeSingle();
+            if (findError) throw findError;
+            if (!original) return res.status(404).json({ success: false });
+            if (original.user_id !== req.user.id) return res.status(403).json({ success: false });
+            if (!await readablePost(supabase, original.post_id, req.user.id)) {
+                return res.status(404).json({ success: false });
+            }
+            const { error } = await supabase.from("posts_comments")
+                .delete().eq("id", original.id).eq("user_id", req.user.id);
+            if (error) throw error;
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Ошибка удаления комментария:", error);
+            res.status(500).json({ success: false });
+        }
+    });
+
 }
