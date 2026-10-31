@@ -229,7 +229,7 @@ export default function(app, supabase) {
                 .from("habit_completions")
                 .select("id")
                 .eq("habit_id", habitId)
-                .eq("user_id", userId)
+                .eq("user_id", progressUserId)
                 .eq("completed_at", todayMoscow);
 
                 let completionId = null;
@@ -239,7 +239,7 @@ export default function(app, supabase) {
                         .from("habit_completions")
                         .insert({
                             habit_id: habitId,
-                            user_id: userId,
+                            user_id: progressUserId,
                             completed_at: todayMoscow,
                             is_user_marked: false
                         })
