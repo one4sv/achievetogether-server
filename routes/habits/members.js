@@ -31,26 +31,28 @@ export default function (app, supabase) {
     app.post("/habits/:id/members", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         const userId = req.body?.user_id;
-        if (typeof userId !== "string") return res.status(400).json({ success: false });
+        const nick = req.body?.nick;
+        if (typeof userId !== "string" && (typeof nick !== "string" || !nick.trim())) return res.status(400).json({ success: false });
         try {
             const { data: habit, error: habitError } = await supabase.from("habits")
                 .select("id, user_id").eq("id", req.params.id).maybeSingle();
             if (habitError) throw habitError;
             if (!habit) return res.status(404).json({ success: false });
             if (habit.user_id !== req.user.id) return res.status(403).json({ success: false });
-            if (userId === habit.user_id) return res.status(400).json({ success: false });
-            const { data: target, error: targetError } = await supabase.from("users")
-                .select("id").eq("id", userId).maybeSingle();
+            const lookup = supabase.from("users").select("id");
+            const { data: target, error: targetError } = await (typeof userId === "string"
+                ? lookup.eq("id", userId) : lookup.eq("nick", nick.trim())).maybeSingle();
+            if (target?.id === habit.user_id) return res.status(400).json({ success: false });
             if (targetError) throw targetError;
             if (!target) return res.status(404).json({ success: false });
             const { data: existing, error: existingError } = await supabase.from("habit_members")
-                .select("status").eq("habit_id", habit.id).eq("user_id", userId).maybeSingle();
+                .select("status").eq("habit_id", habit.id).eq("user_id", target.id).maybeSingle();
             if (existingError) throw existingError;
             if (existing?.status === "accepted" || existing?.status === "pending") {
                 return res.status(409).json({ success: false, error: "Already invited" });
             }
             const { error } = await supabase.from("habit_members").upsert({
-                habit_id: habit.id, user_id: userId, invited_by: req.user.id,
+                habit_id: habit.id, user_id: target.id, invited_by: req.user.id,
                 status: "pending", updated_at: new Date().toISOString()
             }, { onConflict: "habit_id,user_id" });
             if (error) throw error;
