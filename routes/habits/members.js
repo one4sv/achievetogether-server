@@ -230,8 +230,10 @@ export default function (app, supabase) {
             const { data: recipientSettings, error: settingsError } = await supabase.from("settings")
                 .select("private").eq("user_id", target.id).maybeSingle();
             if (settingsError) throw settingsError;
-            if (recipientSettings?.private?.activity_invites === "nobody") {
-                return res.status(403).json({ success: false, error: "Пользователь запретил приглашения в активности" });
+            const privacy = recipientSettings?.private || {};
+            const exception = privacy.activity_invite_exceptions?.[req.user.id];
+            if (exception === "deny" || (exception !== "allow" && privacy.activity_invites === "nobody")) {
+                return res.status(403).json({ success: false, error: "Пользователь ограничил приглашения в активности" });
             }
             const { data: existing, error: existingError } = await supabase.from("habit_members")
                 .select("status").eq("habit_id", habit.id).eq("user_id", target.id).maybeSingle();
