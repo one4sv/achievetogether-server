@@ -11,6 +11,11 @@ export default function (app, supabase) {
         }
 
         try {
+            const { data: memberships, error: membersError } = await supabase
+                .from("habit_members").select("habit_id")
+                .eq("user_id", userId).eq("status", "accepted");
+            if (membersError) throw membersError;
+            const acceptedIds = (memberships || []).map(member => member.habit_id);
             const { data: habitsArr, error: habitsError } = await withRetry(() =>
                 supabase
                     .from("habits")
@@ -22,7 +27,7 @@ export default function (app, supabase) {
                             auto_schedule_completion
                         )
                     `)
-                    .eq("user_id", userId)
+                    .or(`user_id.eq.${userId}${acceptedIds.length ? `,id.in.(${acceptedIds.join(",")})` : ""}`)
             );
 
             if (habitsError) {
@@ -57,6 +62,7 @@ export default function (app, supabase) {
                     ...habit,
                     settings,
                     done: doneSet.has(habit.id),
+                    isOwner: habit.user_id === userId,
                 };
             });
 
