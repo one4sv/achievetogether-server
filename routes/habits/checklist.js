@@ -3,6 +3,17 @@ import { withRetry } from "../../utils/withRetry.js";
 import { checklistInput, isPositiveId } from "../../utils/validation.js";
 
 export default function (app, supabase) {
+    const canUseHabit = async (habitId, userId) => {
+        const { data: habit, error } = await supabase.from("habits")
+            .select("user_id").eq("id", habitId).maybeSingle();
+        if (error || !habit) return false;
+        if (habit.user_id === userId) return true;
+        const { data: member, error: memberError } = await supabase.from("habit_members")
+            .select("status").eq("habit_id", habitId).eq("user_id", userId)
+            .eq("status", "accepted").maybeSingle();
+        return !memberError && !!member;
+    };
+
     app.post("/checklist/save", authenticateUser(supabase), async (req, res) => {
         const userId = req.user?.id;
         if (!userId) return res.status(401).json({ success: false, error: "Не авторизован" });
@@ -19,10 +30,9 @@ export default function (app, supabase) {
                 .from("habits")
                 .select("id")
                 .eq("id", habit_id)
-                .eq("user_id", userId)
                 .single();
 
-            if (!habit) {
+            if (!habit || !(await canUseHabit(habit_id, userId))) {
                 return res.status(403).json({ success: false, error: "Привычка не найдена или нет доступа" });
             }
 
@@ -31,7 +41,8 @@ export default function (app, supabase) {
                     .from("checklist_completions")
                     .insert({
                         ...input,
-                        habit_id
+                        habit_id,
+                        user_id: userId
                     })
                     .select()
                     .single();
@@ -63,6 +74,7 @@ export default function (app, supabase) {
                 .from("checklist_completions")
                 .select("id, habit_id")
                 .eq("id", id)
+                .eq("user_id", userId)
                 .single();
 
             if (fetchError || !block) {
@@ -73,10 +85,9 @@ export default function (app, supabase) {
                 .from("habits")
                 .select("id")
                 .eq("id", block.habit_id)
-                .eq("user_id", userId)
                 .single();
 
-            if (!habit) {
+            if (!habit || !(await canUseHabit(block.habit_id, userId))) {
                 return res.status(403).json({ success: false, error: "Нет доступа" });
             }
 
@@ -85,6 +96,7 @@ export default function (app, supabase) {
                     .from("checklist_completions")
                     .delete()
                     .eq("id", id)
+                    .eq("user_id", userId)
             );
 
             if (error) throw error;
@@ -116,6 +128,7 @@ export default function (app, supabase) {
                 .from("checklist_completions")
                 .select("id, habit_id")
                 .eq("id", id)
+                .eq("user_id", userId)
                 .single();
 
             if (fetchError || !block) {
@@ -126,10 +139,9 @@ export default function (app, supabase) {
                 .from("habits")
                 .select("id")
                 .eq("id", block.habit_id)
-                .eq("user_id", userId)
                 .single();
 
-            if (!habit) {
+            if (!habit || !(await canUseHabit(block.habit_id, userId))) {
                 return res.status(403).json({ success: false, error: "Нет доступа" });
             }
 
@@ -138,6 +150,7 @@ export default function (app, supabase) {
                     .from("checklist_completions")
                     .update(input)
                     .eq("id", id)
+                    .eq("user_id", userId)
                     .select()
                     .single()
             );
