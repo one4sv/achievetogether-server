@@ -25,16 +25,21 @@ export default function (app, supabase) {
       .eq("user_id", user_id)
       .single();
 
-    return !error && data;
+    if (!error && data) return true;
+    const { data: membership, error: memberError } = await supabase.from("habit_members")
+      .select("status").eq("habit_id", habit_id).eq("user_id", user_id)
+      .eq("status", "accepted").maybeSingle();
+    return !memberError && !!membership;
   };
 
-  const getTodayCounter = async (habit_id) => {
+  const getTodayCounter = async (habit_id, user_id) => {
     const { start, end } = getTodayRange();
 
     const { data } = await supabase
       .from("habit_counters")
       .select("*")
       .eq("habit_id", habit_id)
+      .eq("user_id", user_id)
       .gte("created_at", start)
       .lt("created_at", end)
       .maybeSingle();
@@ -42,11 +47,12 @@ export default function (app, supabase) {
     return data;
   };
 
-  const createTodayCounter = async (habit_id, min_count) => {
+  const createTodayCounter = async (habit_id, min_count, user_id) => {
     const { data, error } = await supabase
       .from("habit_counters")
       .insert({
         habit_id,
+        user_id,
         count: 0,
         progression: [],
         min_count
@@ -58,10 +64,10 @@ export default function (app, supabase) {
     return data;
   };
 
-  const getOrCreateTodayCounter = async (habit_id, min_count) => {
-    const existing = await getTodayCounter(habit_id);
+  const getOrCreateTodayCounter = async (habit_id, min_count, user_id) => {
+    const existing = await getTodayCounter(habit_id, user_id);
     if (existing) return existing;
-    return await createTodayCounter(habit_id, min_count);
+    return await createTodayCounter(habit_id, min_count, user_id);
   };
 
   const getMinCount = async (habit_id) => {
@@ -109,7 +115,7 @@ export default function (app, supabase) {
       const owner = await checkHabitOwner(habit_id, user_id);
       if (!owner) return res.status(403).json({ success: false });
 
-      const counter = await getTodayCounter(habit_id);
+      const counter = await getTodayCounter(habit_id, user_id);
 
       res.json({ success: true, counter });
 
@@ -132,7 +138,7 @@ export default function (app, supabase) {
       if (!owner) return res.status(403).json({ success: false });
 
       const min_count = await getMinCount(habit_id);
-      const counter = await getOrCreateTodayCounter(habit_id, min_count);
+      const counter = await getOrCreateTodayCounter(habit_id, min_count, user_id);
 
       const oldCount = Number(counter.count);
       const newCount = Math.max(0, oldCount + val);
@@ -180,7 +186,7 @@ export default function (app, supabase) {
       if (!owner) return res.status(403).json({ success: false });
 
       const min_count = await getMinCount(habit_id);
-      const counter = await getOrCreateTodayCounter(habit_id, min_count);
+      const counter = await getOrCreateTodayCounter(habit_id, min_count, user_id);
 
       const oldCount = Number(counter.count);
       const delta = 0 - oldCount;
@@ -226,8 +232,8 @@ export default function (app, supabase) {
     if (!habit_id) return res.status(400).json({ success: false });
 
     try {
-      const owner = await checkHabitOwner(habit_id, user_id);
-      if (!owner) return res.status(403).json({ success: false });
+      const { data: ownedHabit } = await supabase.from("habits").select("id").eq("id", habit_id).eq("user_id", user_id).maybeSingle();
+      if (!ownedHabit) return res.status(403).json({ success: false });
 
       const payload = {};
       if (typeof min_counter === "number") payload.min_counter = min_counter;
@@ -259,7 +265,7 @@ export default function (app, supabase) {
       }
 
       if (typeof min_counter === "number") {
-        const todayCounter = await getTodayCounter(habit_id);
+        const todayCounter = await getTodayCounter(habit_id, user_id);
 
         if (todayCounter) {
           const old_min = todayCounter.min_count;
@@ -301,7 +307,7 @@ export default function (app, supabase) {
       const owner = await checkHabitOwner(habit_id, user_id);
       if (!owner) return res.status(403).json({ success: false });
 
-      const counter = await getTodayCounter(habit_id);
+      const counter = await getTodayCounter(habit_id, user_id);
       if (!counter) return res.status(404).json({ success: false });
 
       const progression = counter.progression || [];
