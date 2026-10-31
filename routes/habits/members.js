@@ -66,6 +66,12 @@ export default function (app, supabase) {
             if (target?.id === habit.user_id) return res.status(400).json({ success: false });
             if (targetError) throw targetError;
             if (!target) return res.status(404).json({ success: false });
+            const { data: recipientSettings, error: settingsError } = await supabase.from("settings")
+                .select("private").eq("user_id", target.id).maybeSingle();
+            if (settingsError) throw settingsError;
+            if (recipientSettings?.private?.activity_invites === "nobody") {
+                return res.status(403).json({ success: false, error: "Пользователь запретил приглашения в активности" });
+            }
             const { data: existing, error: existingError } = await supabase.from("habit_members")
                 .select("status").eq("habit_id", habit.id).eq("user_id", target.id).maybeSingle();
             if (existingError) throw existingError;
