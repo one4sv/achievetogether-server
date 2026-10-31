@@ -55,6 +55,35 @@ export default function (app, supabase) {
         }
     });
 
+    app.post("/habits/:id/join-chat", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        try {
+            const { data: habit, error: habitError } = await supabase.from("habits")
+                .select("id, user_id, chat_id, chat_participation_mode")
+                .eq("id", req.params.id).maybeSingle();
+            if (habitError) throw habitError;
+            if (!habit || !habit.chat_id) return res.status(404).json({ success: false });
+            const { data: inChat, error: chatError } = await supabase.from("chat_members")
+                .select("id").eq("chat_id", habit.chat_id).eq("user_id", req.user.id).maybeSingle();
+            if (chatError) throw chatError;
+            if (!inChat) return res.status(403).json({ success: false, error: "Вы не участник беседы" });
+            if (habit.user_id === req.user.id) return res.json({ success: true });
+            const { data: existing, error: existingError } = await supabase.from("habit_members")
+                .select("status").eq("habit_id", habit.id).eq("user_id", req.user.id).maybeSingle();
+            if (existingError) throw existingError;
+            if (existing?.status === "accepted") return res.json({ success: true });
+            const { error } = await supabase.from("habit_members").upsert({
+                habit_id: habit.id, user_id: req.user.id, invited_by: habit.user_id,
+                status: "accepted", updated_at: new Date().toISOString()
+            }, { onConflict: "habit_id,user_id" });
+            if (error) throw error;
+            return res.json({ success: true });
+        } catch (error) {
+            console.error("Ошибка присоединения к активности беседы:", error);
+            return res.status(500).json({ success: false });
+        }
+    });
+
     app.get("/habits/invitations", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         try {
