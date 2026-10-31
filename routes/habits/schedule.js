@@ -388,19 +388,8 @@ export default function (app, supabase) {
         }
 
         try {
-            const { data: habit, error: habitError } = await supabase
-                .from("habits")
-                .select("id")
-                .eq("id", habitId)
-                .eq("user_id", req.user.id)
-                .single();
-
-            if (habitError || !habit) {
-                return res.status(403).json({ 
-                    success: false, 
-                    error: "Нет доступа к привычке" 
-                });
-            }
+            const access = await habitAccess(habitId, req.user.id);
+            if (!access) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
 
             const { data: completions, error: completionsError } = await supabase
                 .from("schedule_completions")
@@ -412,6 +401,7 @@ export default function (app, supabase) {
                     created_at
                 `)
                 .eq("habit_id", habitId)
+                .eq("user_id", req.user.id)
                 .order("date", { ascending: true })
                 .order("created_at", { ascending: true });
 
