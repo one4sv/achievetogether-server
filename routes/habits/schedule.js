@@ -3,25 +3,46 @@ import { isCalendarDate } from "../../utils/validation.js";
 import { isEvenScheduleWeek } from "../../utils/scheduleWeek.js";
 
 export default function (app, supabase) {
+    const habitAccess = async (habitId, userId) => {
+        const { data: habit, error } = await supabase.from("habits")
+            .select("id, user_id, schedule_blocks_mode, members_can_edit_blocks")
+            .eq("id", habitId).maybeSingle();
+        if (error || !habit) return null;
+        if (habit.user_id === userId) return { habit, isOwner: true };
+        const { data: membership, error: memberError } = await supabase.from("habit_members")
+            .select("status").eq("habit_id", habitId).eq("user_id", userId)
+            .eq("status", "accepted").maybeSingle();
+        return !memberError && membership ? { habit, isOwner: false } : null;
+    };
+    const blockUserId = (access, userId) =>
+        access.habit.schedule_blocks_mode === "personal" ? userId : access.habit.user_id;
+
     app.get("/schedule", authenticateUser(supabase), async (req, res) => {
         const { id: user_id } = req.user;
 
         try {
-            const { data: habits } = await supabase
+            const { data: memberships, error: membershipError } = await supabase.from("habit_members")
+                .select("habit_id").eq("user_id", user_id).eq("status", "accepted");
+            if (membershipError) throw membershipError;
+            const sharedIds = (memberships || []).map(m => m.habit_id);
+            const { data: habits, error: habitError } = await supabase
                 .from("habits")
-                .select("id")
-                .eq("user_id", user_id);
+                .select("id, user_id, schedule_blocks_mode")
+                .or(`user_id.eq.${user_id}${sharedIds.length ? `,id.in.(${sharedIds.join(",")})` : ""}`);
+            if (habitError) throw habitError;
 
             if (!habits) {
                 return res.json({ success:true, message:"nohabits" })
             }
             const habitIds = habits.map(h => h.id);
+            if (!habitIds.length) return res.json({ success: true, schedules: {}, settings: {} });
 
             const { data: scheduleBlocks, error: scheduleError } = await supabase
                 .from("schedule")
                 .select(`
                     id,
                     habit_id,
+                    user_id,
                     day_of_week,
                     "isSeparator",
                     name,
@@ -39,7 +60,10 @@ export default function (app, supabase) {
 
             if (settingsError) throw settingsError;
 
-            const schedules = (scheduleBlocks || []).reduce((acc, b) => {
+            const schedules = (scheduleBlocks || []).filter(b => {
+                const habit = habits.find(h => h.id === b.habit_id);
+                return habit && b.user_id === (habit.schedule_blocks_mode === "personal" ? user_id : habit.user_id);
+            }).reduce((acc, b) => {
                 const hid = String(b.habit_id);
                 if (!acc[hid]) acc[hid] = [];
 
