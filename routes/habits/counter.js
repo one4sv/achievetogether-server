@@ -147,35 +147,10 @@ export default function (app, supabase) {
       const owner = await checkHabitOwner(habit_id, user_id);
       if (!owner) return res.status(403).json({ success: false });
 
-      const min_count = await getMinCount(habit_id);
-      const counter = await getOrCreateTodayCounter(habit_id, min_count, user_id);
-
-      const oldCount = Number(counter.count);
-      const newCount = Math.max(0, oldCount + val);
-
-      const old_state = oldCount >= min_count;
-      const new_state = newCount >= min_count;
-
-      const progressEntry = {
-        count: val,
-        time: new Date().toISOString(),
-        text: ""
-      };
-
-      const newProgression = [...(counter.progression || []), progressEntry];
-
-      const { error: updateError } = await supabase
-        .from("habit_counters")
-        .update({
-          count: newCount,
-          progression: newProgression
-        })
-        .eq("id", counter.id);
-
-      if (updateError) throw updateError;
-
-      // Обновляем completion
-      await checkAndUpdateCompletion(habit_id, user_id, old_state, new_state);
+      const { data, error } = await supabase.rpc("change_habit_counter", {
+        p_habit_id: Number(habit_id), p_actor: user_id, p_delta: val, p_reset: false
+      });
+      if (error) throw error;
 
       res.json({ success: true });
 
@@ -195,37 +170,10 @@ export default function (app, supabase) {
       const owner = await checkHabitOwner(habit_id, user_id);
       if (!owner) return res.status(403).json({ success: false });
 
-      const min_count = await getMinCount(habit_id);
-      const counter = await getOrCreateTodayCounter(habit_id, min_count, user_id);
-
-      const oldCount = Number(counter.count);
-      const delta = 0 - oldCount;
-
-      let newProgression = [...(counter.progression || [])];
-
-      if (delta !== 0) {
-        newProgression.push({
-          count: delta,
-          time: new Date().toISOString(),
-          text: ""
-        });
-      }
-
-      const old_state = oldCount >= min_count;
-      const new_state = 0 >= min_count;  // Обычно false, если min_count > 0
-
-      const { error: updateError } = await supabase
-        .from("habit_counters")
-        .update({
-          count: 0,
-          progression: newProgression
-        })
-        .eq("id", counter.id);
-
-      if (updateError) throw updateError;
-
-      // Обновляем completion
-      await checkAndUpdateCompletion(habit_id, user_id, old_state, new_state);
+      const { error } = await supabase.rpc("change_habit_counter", {
+        p_habit_id: Number(habit_id), p_actor: user_id, p_delta: 0, p_reset: true
+      });
+      if (error) throw error;
 
       res.json({ success: true });
 
