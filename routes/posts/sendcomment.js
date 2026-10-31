@@ -15,6 +15,18 @@ export default function (app, supabase) {
                 return res.status(400).json({ success: false, error: "Не указан post_id" });
             }
 
+            let parentId = null;
+            if (req.body.parent_id) {
+                const { data: parent, error: parentError } = await supabase
+                    .from("posts_comments").select("id, post_id, parent_id")
+                    .eq("id", req.body.parent_id).maybeSingle();
+                if (parentError) throw parentError;
+                if (!parent || String(parent.post_id) !== String(id)) {
+                    return res.status(400).json({ success: false, error: "Invalid parent comment" });
+                }
+                parentId = parent.parent_id || parent.id;
+            }
+
             const files = [];
             if (req.files && req.files.length > 0) {
                 for (const file of req.files) {
@@ -53,6 +65,7 @@ export default function (app, supabase) {
                         text: text || null,
                         files: files.length > 0 ? files : null,
                         user_id: user_id,
+                        parent_id: parentId,
                     },
                 ])
                 .select("*")
