@@ -1,6 +1,27 @@
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
+    app.get("/habits/invitations", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        try {
+            const { data: invitations, error } = await supabase.from("habit_members")
+                .select("habit_id, status, invited_by, created_at")
+                .eq("user_id", req.user.id).eq("status", "pending");
+            if (error) throw error;
+            const habitIds = (invitations || []).map(item => item.habit_id);
+            if (!habitIds.length) return res.json({ success: true, invitations: [] });
+            const { data: habits, error: habitsError } = await supabase.from("habits")
+                .select("id, name, user_id").in("id", habitIds);
+            if (habitsError) throw habitsError;
+            res.json({ success: true, invitations: (invitations || []).map(item => ({
+                ...item, habit: habits?.find(habit => habit.id === item.habit_id) || null
+            })) });
+        } catch (error) {
+            console.error("Ошибка загрузки приглашений:", error);
+            res.status(500).json({ success: false });
+        }
+    });
+
     app.get("/habits/:id/members", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         try {
