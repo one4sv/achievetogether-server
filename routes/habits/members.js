@@ -24,7 +24,7 @@ export default function (app, supabase) {
                 .in("user_id", userIds).order("created_at", { ascending: false }).limit(150);
             if (completionError) throw completionError;
             const { data: auditEvents, error: auditError } = await supabase.from("habit_activity_events")
-                .select("id, user_id, type, created_at").eq("habit_id", habit.id)
+                .select("id, user_id, type, details, created_at").eq("habit_id", habit.id)
                 .order("created_at", { ascending: false }).limit(150);
             if (auditError) throw auditError;
             for (const item of auditEvents || []) if (item.user_id && !userIds.includes(item.user_id)) userIds.push(item.user_id);
@@ -40,7 +40,8 @@ export default function (app, supabase) {
                 })),
                 ...(auditEvents || []).map(item => ({
                     id: `audit-${item.id}`, type: item.type, user_id: item.user_id,
-                    user: byId.get(item.user_id) || null, created_at: item.created_at
+                    user: byId.get(item.user_id) || null, created_at: item.created_at,
+                    date: item.details?.date || null
                 }))
             ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0,150);
             res.json({ success: true, events });
