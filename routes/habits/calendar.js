@@ -150,11 +150,23 @@ export default function (app, supabase) {
         });
       }
 
+      const { data: ownedHabit, error: ownerError } = await supabase.from("habits")
+        .select("user_id").eq("id", habitId).single();
+      if (ownerError) throw ownerError;
+      if (ownedHabit.user_id !== req.user.id) {
+        const { data: membership, error: membershipError } = await supabase.from("habit_members")
+          .select("status").eq("habit_id", habitId).eq("user_id", req.user.id)
+          .eq("status", "accepted").maybeSingle();
+        if (membershipError) throw membershipError;
+        if (!membership) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
+      }
+
       // Все выполнения
       const { data: completions, error: errorComp } = await supabase
         .from("habit_completions")
         .select("completed_at, created_at")
-        .eq("habit_id", habitId);
+        .eq("habit_id", habitId)
+        .eq("user_id", req.user.id);
 
       if (errorComp) {
         console.log(errorComp);
@@ -165,7 +177,8 @@ export default function (app, supabase) {
       const { data: comments, error: errorComments } = await supabase
         .from("completions_comments")
         .select("comment, date")
-        .eq("habit_id", habitId);
+        .eq("habit_id", habitId)
+        .eq("user_id", req.user.id);
 
       if (errorComments) {
         console.log(errorComments);
@@ -175,7 +188,8 @@ export default function (app, supabase) {
       const { data: planned, error: plannedError } = await supabase
         .from("habit_planned")
         .select("planned_at")
-        .eq("habit_id", habitId);
+        .eq("habit_id", habitId)
+        .eq("user_id", req.user.id);
 
       if (plannedError) {
         console.log(plannedError);
@@ -238,6 +252,7 @@ export default function (app, supabase) {
         .from("habit_timers")
         .select("id, started_at, end_at, status, pauses, circles")
         .eq("habit_id", habitId)
+        .eq("user_id", req.user.id)
         .order("started_at", { ascending: false });
 
       if (timersError) {
@@ -248,6 +263,7 @@ export default function (app, supabase) {
         .from("habit_counters")
         .select("id, created_at, count, progression, min_count")
         .eq("habit_id", habitId)
+        .eq("user_id", req.user.id)
         .order("created_at", { ascending: false });
 
       if (countersError) {
