@@ -58,8 +58,8 @@ export default function registerAllRoutes(app, supabase) {
     confirmRoutes(app, supabase);
     userRoutes(app, supabase);
     addhabitRoutes(app, supabase);
-    habitsRoutes(app, supabase);
     habitMembersRoutes(app, supabase);
+    habitsRoutes(app, supabase);
     settingsRoutes(app, supabase);
     updatesettingsRoutes(app, supabase);
     updatehabitRoutes(app, supabase);
