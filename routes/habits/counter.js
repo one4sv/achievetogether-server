@@ -32,14 +32,22 @@ export default function (app, supabase) {
     return !memberError && !!membership;
   };
 
+  const metricUser = async (habit_id, user_id) => {
+    const { data: habit, error } = await supabase.from("habits")
+      .select("user_id, metric_progress_mode").eq("id", habit_id).maybeSingle();
+    if (error || !habit) throw error || new Error("Activity not found");
+    return habit.metric_progress_mode === "shared" ? habit.user_id : user_id;
+  };
+
   const getTodayCounter = async (habit_id, user_id) => {
     const { start, end } = getTodayRange();
+    const progressUserId = await metricUser(habit_id, user_id);
 
     const { data } = await supabase
       .from("habit_counters")
       .select("*")
       .eq("habit_id", habit_id)
-      .eq("user_id", user_id)
+      .eq("user_id", progressUserId)
       .gte("created_at", start)
       .lt("created_at", end)
       .maybeSingle();
@@ -48,11 +56,12 @@ export default function (app, supabase) {
   };
 
   const createTodayCounter = async (habit_id, min_count, user_id) => {
+    const progressUserId = await metricUser(habit_id, user_id);
     const { data, error } = await supabase
       .from("habit_counters")
       .insert({
         habit_id,
-        user_id,
+        user_id: progressUserId,
         count: 0,
         progression: [],
         min_count
