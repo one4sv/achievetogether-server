@@ -160,62 +160,40 @@ export default function (app, supabase) {
         }
 
         try {
-            const { data: activity, error: activityError } = await supabase.from("habits")
-                .select("id, user_id, members_can_edit_blocks").eq("id", habit_id).maybeSingle();
-            if (activityError) throw activityError;
-            if (!activity) return res.status(404).json({ success: false });
-            if (activity.user_id !== req.user.id) {
-                const { data: member, error: memberError } = await supabase.from("habit_members")
-                    .select("status").eq("habit_id", habit_id).eq("user_id", req.user.id)
-                    .eq("status", "accepted").maybeSingle();
-                if (memberError) throw memberError;
-                if (!member || !activity.members_can_edit_blocks) return res.status(403).json({ success: false, error: "Нет прав менять блоки" });
+            const access = await habitAccess(habit_id, req.user.id);
+            if (!access) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
+            if (!access.isOwner && access.habit.schedule_blocks_mode === "shared" && !access.habit.members_can_edit_blocks) {
+                return res.status(403).json({ success: false, error: "Нет прав изменять общие блоки" });
             }
-            await supabase
-                .from("schedule_settings")
-                .upsert({
-                    habit_id,
-                    isSeparated
-                }, {
-                    onConflict: "habit_id"
-                });
-                
+            const editorId = blockUserId(access, req.user.id);
+            if (access.isOwner && typeof isSeparated === "boolean") {
+                const { error } = await supabase.from("schedule_settings")
+                    .upsert({ habit_id, isSeparated }, { onConflict: "habit_id" });
+                if (error) throw error;
+            }
             for (const block of blocks) {
-                if (block.id && !block.name.trim()) {
-                    await supabase
-                        .from("schedule")
-                        .delete()
-                        .eq("id", block.id)
-                        .eq("habit_id", habit_id)
-
-                    continue
+                const name = typeof block.name === "string" ? block.name.trim() : "";
+                if (block.id && !name) {
+                    const { error } = await supabase.from("schedule").delete()
+                        .eq("id", block.id).eq("habit_id", habit_id).eq("user_id", editorId);
+                    if (error) throw error;
+                    continue;
                 }
-
+                const payload = {
+                    day_of_week: block.day_of_week,
+                    isSeparator: block.isSeparator,
+                    name,
+                    start_time: block.start_time || null,
+                    end_time: block.end_time || null
+                };
                 if (block.id !== 0) {
-                    await supabase
-                        .from("schedule")
-                        .update({
-                            day_of_week: block.day_of_week,
-                            isSeparator: block.isSeparator,
-                            name: block.name.trim(),
-                            start_time: block.start_time || null,
-                            end_time: block.end_time || null
-                        })
-                        .eq("id", block.id)
-                        .eq("habit_id", habit_id)
-
-                } else if (block.name.trim()) {
-
-                    await supabase
-                        .from("schedule")
-                        .insert([{
-                            habit_id,
-                            day_of_week: block.day_of_week,
-                            isSeparator: block.isSeparator,
-                            name: block.name.trim(),
-                            start_time: block.start_time || null,
-                            end_time: block.end_time || null
-                        }]);
+                    const { error } = await supabase.from("schedule").update(payload)
+                        .eq("id", block.id).eq("habit_id", habit_id).eq("user_id", editorId);
+                    if (error) throw error;
+                } else if (name) {
+                    const { error } = await supabase.from("schedule")
+                        .insert([{ habit_id, user_id: editorId, ...payload }]);
+                    if (error) throw error;
                 }
             }
 
