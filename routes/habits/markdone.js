@@ -6,6 +6,18 @@ export default function (app, supabase) {
     const { habit_id, date } = req.body;
 
     try {
+      if (!habit_id) return res.status(400).json({ success: false });
+      const { data: habit, error: habitError } = await supabase.from("habits")
+        .select("id, user_id").eq("id", habit_id).maybeSingle();
+      if (habitError) throw habitError;
+      if (!habit) return res.status(404).json({ success: false });
+      if (habit.user_id !== user_id) {
+        const { data: member, error: memberError } = await supabase.from("habit_members")
+          .select("status").eq("habit_id", habit_id)
+          .eq("user_id", user_id).eq("status", "accepted").maybeSingle();
+        if (memberError) throw memberError;
+        if (!member) return res.status(403).json({ success: false });
+      }
       const today = new Date().toLocaleDateString("en-CA", {
         timeZone: "Europe/Moscow"
       });
