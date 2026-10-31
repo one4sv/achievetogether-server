@@ -81,7 +81,7 @@ export default function (app, supabase) {
       const { data: habits } = await supabase
         .from("habits")
         .select("*")
-        .eq("group_id", groupId);
+        .eq("chat_id", groupId);
 
       // 5. Медиа-файлы из сообщений группы (все файлы, newest first, как в /acc/:nick)
       const { data: messageIdsData } = await supabase
