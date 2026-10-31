@@ -1,6 +1,50 @@
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
+    app.get("/habits/:id/activity", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        try {
+            const { data: habit, error: habitError } = await supabase.from("habits")
+                .select("id, user_id").eq("id", req.params.id).maybeSingle();
+            if (habitError) throw habitError;
+            if (!habit) return res.status(404).json({ success: false });
+            if (habit.user_id !== req.user.id) {
+                const { data: member, error: memberError } = await supabase.from("habit_members")
+                    .select("status").eq("habit_id", habit.id).eq("user_id", req.user.id)
+                    .eq("status", "accepted").maybeSingle();
+                if (memberError) throw memberError;
+                if (!member) return res.status(403).json({ success: false });
+            }
+            const { data: members, error: membershipsError } = await supabase.from("habit_members")
+                .select("user_id, status, created_at").eq("habit_id", habit.id);
+            if (membershipsError) throw membershipsError;
+            const userIds = [...new Set([habit.user_id, ...(members || []).filter(m => m.status === "accepted").map(m => m.user_id)])];
+            const { data: completions, error: completionError } = await supabase.from("habit_completions")
+                .select("id, user_id, completed_at, created_at").eq("habit_id", habit.id)
+                .in("user_id", userIds).order("created_at", { ascending: false }).limit(150);
+            if (completionError) throw completionError;
+            const { data: users, error: usersError } = await supabase.from("users")
+                .select("id, nick, username, avatar_url").in("id", userIds);
+            if (usersError) throw usersError;
+            const byId = new Map((users || []).map(user => [user.id, user]));
+            const events = [
+                ...(completions || []).map(item => ({
+                    id: `completion-${item.id}`, type: "completion", user_id: item.user_id,
+                    user: byId.get(item.user_id) || null, date: item.completed_at,
+                    created_at: item.created_at
+                })),
+                ...(members || []).filter(m => m.status === "accepted").map(item => ({
+                    id: `member-${item.user_id}`, type: "joined", user_id: item.user_id,
+                    user: byId.get(item.user_id) || null, created_at: item.created_at
+                }))
+            ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0,150);
+            res.json({ success: true, events });
+        } catch (error) {
+            console.error("Ошибка журнала участников:", error);
+            res.status(500).json({ success: false, error: "Не удалось загрузить журнал" });
+        }
+    });
+
     app.patch("/habits/:id/collaboration", authenticateUser(supabase), async (req, res) => {
         const allowed = {
             metric_progress_mode: ["personal", "shared"],
