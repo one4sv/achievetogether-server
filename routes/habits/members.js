@@ -14,6 +14,26 @@ export default function (app, supabase) {
             const { error } = await supabase.from("habits").update({ chat_participation_mode: mode })
                 .eq("id", habit.id).eq("user_id", req.user.id);
             if (error) throw error;
+            if (mode === "required") {
+                const { data: chatMembers, error: chatError } = await supabase.from("chat_members")
+                    .select("user_id").eq("chat_id", habit.chat_id);
+                if (chatError) throw chatError;
+                const ids = (chatMembers || []).map(member => member.user_id).filter(id => id !== habit.user_id);
+                if (ids.length) {
+                    const { data: existing, error: existingError } = await supabase.from("habit_members")
+                        .select("user_id, status").eq("habit_id", habit.id).in("user_id", ids);
+                    if (existingError) throw existingError;
+                    const accepted = new Set((existing || []).filter(row => row.status === "accepted").map(row => row.user_id));
+                    const missing = ids.filter(id => !accepted.has(id));
+                    if (missing.length) {
+                        const { error: syncError } = await supabase.from("habit_members").upsert(
+                            missing.map(id => ({ habit_id: habit.id, user_id: id, invited_by: habit.user_id, status: "accepted", updated_at: new Date().toISOString() })),
+                            { onConflict: "habit_id,user_id" }
+                        );
+                        if (syncError) throw syncError;
+                    }
+                }
+            }
             return res.json({ success: true, mode });
         } catch (error) {
             console.error("Ошибка режима совместной активности:", error);
