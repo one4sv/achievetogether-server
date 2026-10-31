@@ -41,6 +41,19 @@ export default function (app, supabase) {
                 return res.status(500).json({ success: false, message: "Ошибка при получении пользователей" });
             }
 
+            const commentIds = commentsData.map(comment => comment.id);
+            const { data: likes, error: likesError } = await supabase
+                .from("post_comment_likes")
+                .select("comment_id, user_id")
+                .in("comment_id", commentIds);
+            if (likesError) throw likesError;
+            const likesByComment = new Map();
+            for (const like of likes || []) {
+                const group = likesByComment.get(like.comment_id) || [];
+                group.push(like.user_id);
+                likesByComment.set(like.comment_id, group);
+            }
+
             // Сопоставляем пользователей с комментариями
             const signed = await signedRows(supabase, commentsData, "files", "comments");
             const comments = signed.map(c => ({
@@ -53,6 +66,35 @@ export default function (app, supabase) {
             res.status(500).json({ success: false, message: "Ошибка сервера" });
         }
     });
+    app.post("/comments/:id/like", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        try {
+            const { data: comment, error: readError } = await supabase
+                .from("posts_comments").select("id, post_id").eq("id", req.params.id).maybeSingle();
+            if (readError) throw readError;
+            if (!comment || !await readablePost(supabase, comment.post_id, req.user.id)) {
+                return res.status(404).json({ success: false });
+            }
+            const { data: previous, error: checkError } = await supabase
+                .from("post_comment_likes").select("comment_id")
+                .eq("comment_id", comment.id).eq("user_id", req.user.id).maybeSingle();
+            if (checkError) throw checkError;
+            if (previous) {
+                const { error } = await supabase.from("post_comment_likes").delete()
+                    .eq("comment_id", comment.id).eq("user_id", req.user.id);
+                if (error) throw error;
+                return res.json({ success: true, liked: false });
+            }
+            const { error } = await supabase.from("post_comment_likes")
+                .upsert({ comment_id: comment.id, user_id: req.user.id }, { onConflict: "comment_id,user_id" });
+            if (error) throw error;
+            res.json({ success: true, liked: true });
+        } catch (error) {
+            console.error("Ошибка лайка комментария:", error);
+            res.status(500).json({ success: false });
+        }
+    });
+
     app.patch("/comments/:id", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         const text = req.body?.text;
