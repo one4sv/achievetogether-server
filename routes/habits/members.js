@@ -6,7 +6,7 @@ export default function (app, supabase) {
         try {
             const { data: invitations, error } = await supabase.from("habit_members")
                 .select("habit_id, status, invited_by, created_at")
-                .eq("user_id", req.user.id).eq("status", "pending");
+                .eq("user_id", req.user.id).in("status", ["pending", "accepted"]);
             if (error) throw error;
             const habitIds = (invitations || []).map(item => item.habit_id);
             if (!habitIds.length) return res.json({ success: true, invitations: [] });
