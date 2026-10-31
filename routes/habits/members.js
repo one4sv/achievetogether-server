@@ -1,6 +1,40 @@
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
+    app.patch("/habits/:id/chat", authenticateUser(supabase), async (req, res) => {
+        const userId = req.user?.id;
+        const chatId = req.body?.chat_id;
+        if (!userId) return res.status(401).json({ success: false });
+        if (chatId !== null && (!Number.isSafeInteger(chatId) || chatId <= 0)) {
+            return res.status(400).json({ success: false, error: "Некорректная беседа" });
+        }
+        try {
+            const { data: habit, error: habitError } = await supabase.from("habits")
+                .select("id, user_id, chat_id").eq("id", req.params.id).maybeSingle();
+            if (habitError) throw habitError;
+            if (!habit) return res.status(404).json({ success: false });
+            if (habit.user_id !== userId) return res.status(403).json({ success: false, error: "Только владелец может изменять привязку" });
+            if (chatId !== null) {
+                const { data: chat, error: chatError } = await supabase.from("chats")
+                    .select("id, is_group").eq("id", chatId).maybeSingle();
+                if (chatError) throw chatError;
+                if (!chat || !chat.is_group) return res.status(400).json({ success: false, error: "Выберите беседу" });
+                const { data: member, error: memberError } = await supabase.from("chat_members")
+                    .select("id").eq("chat_id", chatId).eq("user_id", userId).maybeSingle();
+                if (memberError) throw memberError;
+                if (!member) return res.status(403).json({ success: false, error: "Вы не участник этой беседы" });
+            }
+            const { data: updated, error } = await supabase.from("habits")
+                .update({ chat_id: chatId }).eq("id", habit.id).eq("user_id", userId)
+                .select("id, chat_id").single();
+            if (error) throw error;
+            return res.json({ success: true, habit: updated });
+        } catch (error) {
+            console.error("Ошибка привязки активности к беседе:", error);
+            return res.status(500).json({ success: false, error: "Не удалось изменить привязку" });
+        }
+    });
+
     app.get("/habits/invitations", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         try {
