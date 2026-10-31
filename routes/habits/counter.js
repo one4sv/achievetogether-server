@@ -92,6 +92,7 @@ export default function (app, supabase) {
   // Helper для обновления completion
   const checkAndUpdateCompletion = async (habit_id, user_id, old_state, new_state) => {
     const today = getTodayDate();
+    const completionUserId = await metricUser(habit_id, user_id);
 
     if (!old_state && new_state) {
       // Добавляем completion
@@ -100,7 +101,7 @@ export default function (app, supabase) {
         .insert({
           habit_id,
           completed_at: today,
-          user_id
+          user_id: completionUserId
         });
 
       if (error) throw error;
@@ -110,7 +111,7 @@ export default function (app, supabase) {
         .from("habit_completions")
         .delete()
         .eq("habit_id", habit_id)
-        .eq("user_id", user_id)
+        .eq("user_id", completionUserId)
         .eq("completed_at", today);
 
       if (error) throw error;
