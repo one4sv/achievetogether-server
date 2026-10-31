@@ -229,19 +229,8 @@ export default function (app, supabase) {
 
         try {
             // 1. Проверяем права доступа к привычке
-            const { data: habit, error: habitError } = await supabase
-                .from("habits")
-                .select("id")
-                .eq("id", habitIdNum)
-                .eq("user_id", req.user.id)
-                .single();
-
-            if (habitError || !habit) {
-                return res.status(403).json({ 
-                    success: false, 
-                    error: "Нет доступа к привычке" 
-                });
-            }
+            const access = await habitAccess(habitIdNum, req.user.id);
+            if (!access) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
 
             // 2. Проверяем, что блок принадлежит этой привычке
             const { data: block, error: blockError } = await supabase
@@ -249,6 +238,7 @@ export default function (app, supabase) {
                 .select("id")
                 .eq("id", blockIdNum)
                 .eq("habit_id", habitIdNum)
+                .eq("user_id", blockUserId(access, req.user.id))
                 .single();
 
             if (blockError || !block) {
@@ -264,6 +254,7 @@ export default function (app, supabase) {
                 .select("id")
                 .eq("habit_id", habitIdNum)
                 .eq("schedule_id", blockIdNum)
+                .eq("user_id", req.user.id)
                 .eq("date", date)
                 .single();
 
@@ -280,6 +271,7 @@ export default function (app, supabase) {
                     .insert({
                         habit_id: habitIdNum,
                         schedule_id: blockIdNum,
+                        user_id: req.user.id,
                         date: date
                     });
                 if (insertError) throw insertError;
@@ -308,7 +300,8 @@ export default function (app, supabase) {
             const { data: schedule } = await supabase
                 .from("schedule")
                 .select("id, day_of_week, isSeparator")
-                .eq("habit_id", habitIdNum);
+                .eq("habit_id", habitIdNum)
+                .eq("user_id", blockUserId(access, req.user.id));
 
             const { data: week_start } = await supabase
                 .from("settings")
@@ -328,6 +321,7 @@ export default function (app, supabase) {
                 .from("schedule_completions")
                 .select("schedule_id")
                 .eq("habit_id", habitIdNum)
+                .eq("user_id", req.user.id)
                 .eq("date", date);
 
             const completedIds = new Set((completedBlocks || []).map(c => c.schedule_id));
@@ -348,6 +342,7 @@ export default function (app, supabase) {
                 .from("habit_completions")
                 .select("id, is_user_marked")
                 .eq("habit_id", habitIdNum)
+                .eq("user_id", req.user.id)
                 .eq("completed_at", date)
                 .maybeSingle();
 
