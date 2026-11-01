@@ -4,14 +4,8 @@ import { broadcastTimerUpdate } from "../../realtime/ws.js"
 
 export default function(app, supabase) {
     const canUseTimer = async (habitId, userId) => {
-        const { data: habit, error } = await supabase.from("habits")
-            .select("user_id").eq("id", habitId).maybeSingle();
-        if (error || !habit) return false;
-        if (habit.user_id === userId) return true;
-        const { data: member, error: memberError } = await supabase.from("habit_members")
-            .select("status").eq("habit_id", habitId).eq("user_id", userId)
-            .eq("status", "accepted").maybeSingle();
-        return !memberError && !!member;
+        const access = await getHabitAccess(supabase, habitId, userId);
+        return !!access?.is_member && !!access.can_view;
     };
     const metricUser = async (habitId, userId) => {
         const { data: habit, error } = await supabase.from("habits")
@@ -22,13 +16,19 @@ export default function(app, supabase) {
     const notifyTimer = async (habitId, userId, timer) => {
         broadcastTimerUpdate(userId, habitId, timer);
         const { data: habit, error } = await supabase.from("habits")
-            .select("user_id, metric_progress_mode").eq("id", habitId).maybeSingle();
+            .select("user_id, metric_progress_mode, chat_id").eq("id", habitId).maybeSingle();
         if (error || habit?.metric_progress_mode !== "shared") return;
         const { data: members, error: memberError } = await supabase.from("habit_members")
             .select("user_id").eq("habit_id", habitId).eq("status", "accepted");
         if (memberError) return;
         const recipients = new Set([habit.user_id, ...(members || []).map(m => m.user_id)]);
         recipients.delete(userId);
+        if (habit.chat_id) {
+            const { data: blocked, error: blockedError } = await supabase.from("chat_members")
+                .select("user_id").eq("chat_id", habit.chat_id).eq("is_blocked", true);
+            if (blockedError) return;
+            for (const item of blocked || []) recipients.delete(item.user_id);
+        }
         for (const id of recipients) broadcastTimerUpdate(id, habitId, timer);
     };
     app.get("/timer/:habit_id", authenticateUser(supabase), async (req, res) => {

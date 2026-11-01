@@ -19,18 +19,8 @@ export default function (app, supabase) {
   };
 
   const checkHabitOwner = async (habit_id, user_id) => {
-    const { data, error } = await supabase
-      .from("habits")
-      .select("id")
-      .eq("id", habit_id)
-      .eq("user_id", user_id)
-      .single();
-
-    if (!error && data) return true;
-    const { data: membership, error: memberError } = await supabase.from("habit_members")
-      .select("status").eq("habit_id", habit_id).eq("user_id", user_id)
-      .eq("status", "accepted").maybeSingle();
-    return !memberError && !!membership;
+    const access = await getHabitAccess(supabase, habit_id, user_id);
+    return !!access?.is_member && !!access.can_view;
   };
 
   const metricUser = async (habit_id, user_id) => {

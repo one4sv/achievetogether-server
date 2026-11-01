@@ -1,4 +1,4 @@
-import { getHabitAccess } from "../../utils/habitAccess.js";
+import { filterBlockedHabitMemberships, getHabitAccess } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { publishHabitInvitation, sendInvitationError, readHabitInvitation } from "../../services/habitInvitations.js";
 
@@ -17,17 +17,12 @@ export default function (app, supabase) {
     app.get("/habits/:id/activity", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         try {
-            const { data: habit, error: habitError } = await supabase.from("habits")
-                .select("id, user_id").eq("id", req.params.id).maybeSingle();
-            if (habitError) throw habitError;
-            if (!habit) return res.status(404).json({ success: false });
-            if (habit.user_id !== req.user.id) {
-                const { data: member, error: memberError } = await supabase.from("habit_members")
-                    .select("status").eq("habit_id", habit.id).eq("user_id", req.user.id)
-                    .eq("status", "accepted").maybeSingle();
-                if (memberError) throw memberError;
-                if (!member) return res.status(403).json({ success: false });
+            const access = await getHabitAccess(supabase, req.params.id, req.user.id);
+            if (!access) return res.status(404).json({ success: false });
+            if (!access.is_member || !access.can_view) {
+                return res.status(403).json({ success: false, error: "Нет доступа к журналу участников" });
             }
+            const habit = access.habit;
             const { data: members, error: membershipsError } = await supabase.from("habit_members")
                 .select("user_id, status, created_at").eq("habit_id", habit.id);
             if (membershipsError) throw membershipsError;
@@ -163,9 +158,9 @@ export default function (app, supabase) {
             if (habitError) throw habitError;
             if (!habit || !habit.chat_id) return res.status(404).json({ success: false });
             const { data: inChat, error: chatError } = await supabase.from("chat_members")
-                .select("id").eq("chat_id", habit.chat_id).eq("user_id", req.user.id).maybeSingle();
+                .select("id, is_blocked").eq("chat_id", habit.chat_id).eq("user_id", req.user.id).maybeSingle();
             if (chatError) throw chatError;
-            if (!inChat) return res.status(403).json({ success: false, error: "Вы не участник беседы" });
+            if (!inChat || inChat.is_blocked) return res.status(403).json({ success: false, error: "Вы не участник беседы" });
             if (habit.user_id === req.user.id) return res.json({ success: true });
             const { data: existing, error: existingError } = await supabase.from("habit_members")
                 .select("status").eq("habit_id", habit.id).eq("user_id", req.user.id).maybeSingle();
@@ -192,12 +187,16 @@ export default function (app, supabase) {
             if (error) throw error;
             const habitIds = (invitations || []).map(item => item.habit_id);
             if (!habitIds.length) return res.json({ success: true, invitations: [] });
-            const { data: habits, error: habitsError } = await supabase.from("habits")
-                .select("id, name, user_id").in("id", habitIds);
+            const { data: habitsRaw, error: habitsError } = await supabase.from("habits")
+                .select("id, name, user_id, chat_id").in("id", habitIds);
             if (habitsError) throw habitsError;
-            res.json({ success: true, invitations: (invitations || []).map(item => ({
-                ...item, habit: habits?.find(habit => habit.id === item.habit_id) || null
-            })) });
+            const habits = await filterBlockedHabitMemberships(supabase, habitsRaw, req.user.id);
+            const visibleIds = new Set(habits.map(habit => habit.id));
+            res.json({ success: true, invitations: (invitations || [])
+                .filter(item => visibleIds.has(item.habit_id))
+                .map(item => ({
+                    ...item, habit: habits.find(habit => habit.id === item.habit_id) || null
+                })) });
         } catch (error) {
             console.error("Ошибка загрузки приглашений:", error);
             res.status(500).json({ success: false });
