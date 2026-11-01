@@ -1,3 +1,4 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
@@ -129,7 +130,7 @@ export default function (app, supabase) {
     }
   });
 
-  app.get("/calendar/:id", authenticateUser(supabase), async (req, res) => {
+  app.get("/calendar/:id", authenticateUser(supabase), requireHabitPermission(supabase, "view"), async (req, res) => {
     const habitId = parseInt(req.params.id);
 
     if (isNaN(habitId)) {
@@ -150,23 +151,12 @@ export default function (app, supabase) {
         });
       }
 
-      const { data: ownedHabit, error: ownerError } = await supabase.from("habits")
-        .select("user_id").eq("id", habitId).single();
-      if (ownerError) throw ownerError;
-      if (ownedHabit.user_id !== req.user.id) {
-        const { data: membership, error: membershipError } = await supabase.from("habit_members")
-          .select("status").eq("habit_id", habitId).eq("user_id", req.user.id)
-          .eq("status", "accepted").maybeSingle();
-        if (membershipError) throw membershipError;
-        if (!membership) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
-      }
-
       // Все выполнения
       const { data: completions, error: errorComp } = await supabase
         .from("habit_completions")
         .select("completed_at, created_at")
         .eq("habit_id", habitId)
-        .eq("user_id", req.user.id);
+        .eq("user_id", req.habitAccess.progress_user_id);
 
       if (errorComp) {
         console.log(errorComp);

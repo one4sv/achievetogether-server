@@ -1,20 +1,10 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { withRetry } from "../../utils/withRetry.js";
 import { checklistInput, isPositiveId } from "../../utils/validation.js";
 
 export default function (app, supabase) {
-    const canUseHabit = async (habitId, userId) => {
-        const { data: habit, error } = await supabase.from("habits")
-            .select("user_id").eq("id", habitId).maybeSingle();
-        if (error || !habit) return false;
-        if (habit.user_id === userId) return true;
-        const { data: member, error: memberError } = await supabase.from("habit_members")
-            .select("status").eq("habit_id", habitId).eq("user_id", userId)
-            .eq("status", "accepted").maybeSingle();
-        return !memberError && !!member;
-    };
-
-    app.post("/checklist/save", authenticateUser(supabase), async (req, res) => {
+    app.post("/checklist/save", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const userId = req.user?.id;
         if (!userId) return res.status(401).json({ success: false, error: "Не авторизован" });
 
@@ -32,7 +22,7 @@ export default function (app, supabase) {
                 .eq("id", habit_id)
                 .single();
 
-            if (!habit || !(await canUseHabit(habit_id, userId))) {
+            if (!habit) {
                 return res.status(403).json({ success: false, error: "Привычка не найдена или нет доступа" });
             }
 
@@ -42,7 +32,7 @@ export default function (app, supabase) {
                     .insert({
                         ...input,
                         habit_id,
-                        user_id: userId
+                        user_id: req.habitAccess.progress_user_id
                     })
                     .select()
                     .single();
@@ -60,7 +50,13 @@ export default function (app, supabase) {
         }
     });
 
-    app.post("/checklist/delete", authenticateUser(supabase), async (req, res) => {
+    const checklistHabitId = async req => {
+        const { data, error } = await supabase.from("checklist_completions").select("habit_id").eq("id", req.body?.id).maybeSingle();
+        if (error) throw error;
+        return data?.habit_id;
+    };
+
+    app.post("/checklist/delete", authenticateUser(supabase), requireHabitPermission(supabase, "complete", checklistHabitId), async (req, res) => {
         const userId = req.user?.id;
         const { id } = req.body;
         if (!isPositiveId(id)) return res.status(400).json({ success: false, error: "Некорректный ID блока" });
@@ -74,7 +70,7 @@ export default function (app, supabase) {
                 .from("checklist_completions")
                 .select("id, habit_id")
                 .eq("id", id)
-                .eq("user_id", userId)
+                .eq("user_id", req.habitAccess.progress_user_id)
                 .single();
 
             if (fetchError || !block) {
@@ -87,7 +83,7 @@ export default function (app, supabase) {
                 .eq("id", block.habit_id)
                 .single();
 
-            if (!habit || !(await canUseHabit(block.habit_id, userId))) {
+            if (!habit) {
                 return res.status(403).json({ success: false, error: "Нет доступа" });
             }
 
@@ -96,7 +92,7 @@ export default function (app, supabase) {
                     .from("checklist_completions")
                     .delete()
                     .eq("id", id)
-                    .eq("user_id", userId)
+                    .eq("user_id", req.habitAccess.progress_user_id)
             );
 
             if (error) throw error;
@@ -109,7 +105,7 @@ export default function (app, supabase) {
         }
     });
     
-    app.post("/checklist/update", authenticateUser(supabase), async (req, res) => {
+    app.post("/checklist/update", authenticateUser(supabase), requireHabitPermission(supabase, "complete", checklistHabitId), async (req, res) => {
         const userId = req.user?.id;
 
         const { id, name, start_time, end_time, date } = req.body;
@@ -128,7 +124,7 @@ export default function (app, supabase) {
                 .from("checklist_completions")
                 .select("id, habit_id")
                 .eq("id", id)
-                .eq("user_id", userId)
+                .eq("user_id", req.habitAccess.progress_user_id)
                 .single();
 
             if (fetchError || !block) {
@@ -141,7 +137,7 @@ export default function (app, supabase) {
                 .eq("id", block.habit_id)
                 .single();
 
-            if (!habit || !(await canUseHabit(block.habit_id, userId))) {
+            if (!habit) {
                 return res.status(403).json({ success: false, error: "Нет доступа" });
             }
 
@@ -150,7 +146,7 @@ export default function (app, supabase) {
                     .from("checklist_completions")
                     .update(input)
                     .eq("id", id)
-                    .eq("user_id", userId)
+                    .eq("user_id", req.habitAccess.progress_user_id)
                     .select()
                     .single()
             );

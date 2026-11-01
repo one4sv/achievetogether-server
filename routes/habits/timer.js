@@ -1,3 +1,4 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js"
 import { broadcastTimerUpdate } from "../../realtime/ws.js"
 
@@ -86,7 +87,7 @@ export default function(app, supabase) {
         }
     });
 
-    app.post("/timer/start", authenticateUser(supabase), async (req, res) => {
+    app.post("/timer/start", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const { id: userId } = req.user;
         const { habit_id: habitId, time, timer_id: timerId } = req.body;
 
@@ -148,7 +149,7 @@ export default function(app, supabase) {
         }
     });
 
-    app.post("/timer/pause", authenticateUser(supabase), async (req, res) => {
+    app.post("/timer/pause", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const { id: userId } = req.user;
         const { habit_id: habitId, time, timer_id: timerId } = req.body;
 
@@ -177,7 +178,7 @@ export default function(app, supabase) {
         }
     });
 
-    app.post("/timer/stop", authenticateUser(supabase), async (req, res) => {
+    app.post("/timer/stop", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const { id: userId } = req.user;
         const { habit_id: habitId, time, timer_id: timerId } = req.body;
 
@@ -298,7 +299,7 @@ export default function(app, supabase) {
         }
     });
 
-    app.post("/timer/circle", authenticateUser(supabase), async (req, res) => {
+    app.post("/timer/circle", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const { id: userId } = req.user;
         const { habit_id: habitId, time, timer_id: timerId } = req.body;
 
@@ -362,7 +363,7 @@ export default function(app, supabase) {
             res.status(500).json({ success: false, error: "Ошибка сервера" });
         }
     });
-    app.post("/timer/circle/text", authenticateUser(supabase), async (req, res) => {
+    app.post("/timer/circle/text", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const { id: userId } = req.user;
         const { habit_id: habitId, timer_id: timerId, time, text } = req.body;
 

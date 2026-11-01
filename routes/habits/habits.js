@@ -1,3 +1,4 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { withRetry } from "../../utils/withRetry.js";
 
@@ -143,30 +144,13 @@ export default function (app, supabase) {
                 red_counter_left: counterSetRaw.red_counter_left !== null ? Number(counterSetRaw.red_counter_left) : null,
             } : null;
 
-            const { data: privacy, error: privacyError } = await withRetry(() =>
-                supabase
-                    .from("settings")
-                    .select("show_archived_in_acc")
-                    .eq("user_id", habit.user_id)
-                    .maybeSingle()
-            );
-
-            if (privacyError) {
-                console.error(privacyError);
-                return res.status(500).json({ success: false, error: "Ошибка получения настройки приватности" });
-            }
-
-            const showArchived = privacy?.show_archived_in_acc ?? false;
-
-            if (!showArchived && !habit.ongoing && habit.user_id !== currentUserId) {
-                return res.status(403).json({ success: false, error: "Пользователь скрыл активность" });
-            }
-
+            const access = await getHabitAccess(supabase, habit.id, currentUserId);
+            if (!access?.can_view) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
             const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
             const startOfDay = new Date(`${today}T00:00:00+03:00`).toISOString();
             const endOfDay = new Date(new Date(startOfDay).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-            const progressUserId = habit.metric_progress_mode === "shared" ? habit.user_id : currentUserId;
+            const progressUserId = access.progress_user_id;
             let isDone = false;
             let comment = "";
 
@@ -206,7 +190,7 @@ export default function (app, supabase) {
                 comment = commentData?.comment || "";
             }
 
-            const isRead = habit.user_id !== currentUserId;
+            const isRead = !access.can_edit_info;
 
             let timer = null;
             // if (!isRead) {
@@ -283,7 +267,7 @@ export default function (app, supabase) {
                         .from("checklist_completions")
                         .select("id, name, start_time, end_time, date, habit_id")
                         .eq("habit_id", habitId)
-                        .eq("user_id", currentUserId || habit.user_id)
+                        .eq("user_id", progressUserId || habit.user_id)
                         .order("start_time", { ascending: true })
                 );
 
@@ -296,7 +280,7 @@ export default function (app, supabase) {
 
             res.json({
                 success: true,
-                habit,
+                habit: { ...habit, access },
                 isDone,
                 isRead,
                 comment,

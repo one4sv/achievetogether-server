@@ -1,7 +1,8 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
-    app.post("/markplan", authenticateUser(supabase), async (req, res) => {
+    app.post("/markplan", authenticateUser(supabase), requireHabitPermission(supabase, "edit_blocks"), async (req, res) => {
         const { habit_id, date } = req.body;
         const { id: user_id } = req.user;
 
@@ -13,21 +14,6 @@ export default function (app, supabase) {
         }
 
         try {
-            // Проверяем, что привычка принадлежит пользователю
-            const { data: habit, error: habitError } = await supabase
-                .from("habits")
-                .select("id")
-                .eq("id", habit_id)
-                .eq("user_id", user_id)
-                .single();
-
-            if (habitError || !habit) {
-                return res.status(404).json({
-                    success: false,
-                    error: "Привычка не найдена"
-                });
-            }
-
             // Проверяем, существует ли уже план
             const { data: existing, error: existingError } = await supabase
                 .from("habit_planned")

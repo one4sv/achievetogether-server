@@ -72,6 +72,24 @@ export async function broadcastNewMessage(chat_id, message) {
   }
 }
 
+export async function broadcastHabitCommentUpdated(supabase, habitId, date) {
+  try {
+    const { data: habit, error } = await supabase.from("habits").select("user_id").eq("id", habitId).single();
+    if (error) throw error;
+    const { data: members, error: membersError } = await supabase.from("habit_members")
+      .select("user_id").eq("habit_id", habitId).eq("status", "accepted");
+    if (membersError) throw membersError;
+    const ids = new Set([habit.user_id, ...(members || []).map(member => member.user_id)]);
+    for (const id of ids) {
+      clientsMap.get(id)?.forEach(socket => {
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "HABIT_DAY_COMMENT_UPDATED", habitId: Number(habitId), date }));
+      });
+    }
+  } catch (error) {
+    console.error("Ошибка обновления комментариев активности:", error);
+  }
+}
+
 export function broadcastMessageEdited(chat_id, message, eventType = "MESSAGE_EDITED") {
   supabaseGlobal
     .from("chat_members")

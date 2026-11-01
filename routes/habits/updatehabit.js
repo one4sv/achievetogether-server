@@ -1,3 +1,4 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
@@ -35,7 +36,8 @@ export default function (app, supabase) {
                     .eq('status', 'accepted').maybeSingle();
                 if (memberError) throw memberError;
                 const infoFields = ['name', 'desc', 'tag'];
-                if (!member || !habit.members_can_edit_info || table !== 'habits' ||
+                const access = await getHabitAccess(supabase, habit_id, user_id);
+                if (!member || !access?.can_edit_info || table !== 'habits' ||
                     Object.keys(updateData).some(field => !infoFields.includes(field))) {
                     return res.status(403).json({ error: 'Access denied to this habit' });
                 }

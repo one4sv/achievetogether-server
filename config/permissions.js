@@ -1,4 +1,9 @@
 export const PERMS = {
+  habit_complete: "habit_complete",
+  habit_comment: "habit_comment",
+  habit_edit_blocks: "habit_edit_blocks",
+  habit_edit_info: "habit_edit_info",
+  habit_invite: "habit_invite",
   change_avatar: "change_avatar",
   change_name: "change_name",
   change_desc: "change_desc",

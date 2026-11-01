@@ -1,3 +1,4 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
@@ -135,7 +136,7 @@ export default function (app, supabase) {
     }
   });
 
-  app.post("/counter/value", authenticateUser(supabase), async (req, res) => {
+  app.post("/counter/value", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
     const { id: user_id } = req.user;
     const { habit_id, val } = req.body;
 
@@ -160,7 +161,7 @@ export default function (app, supabase) {
     }
   });
 
-  app.post("/counter/restore", authenticateUser(supabase), async (req, res) => {
+  app.post("/counter/restore", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
     const { id: user_id } = req.user;
     const { habit_id } = req.body;
 
@@ -253,7 +254,7 @@ export default function (app, supabase) {
       res.status(500).json({ success: false });
     }
   });
-  app.post("/counter/text", authenticateUser(supabase), async (req, res) => {
+  app.post("/counter/text", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
     const { id: user_id } = req.user;
     const { habit_id, counter_id, time, text } = req.body;
 

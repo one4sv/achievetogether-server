@@ -1,18 +1,12 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { isCalendarDate } from "../../utils/validation.js";
 import { isEvenScheduleWeek } from "../../utils/scheduleWeek.js";
 
 export default function (app, supabase) {
     const habitAccess = async (habitId, userId) => {
-        const { data: habit, error } = await supabase.from("habits")
-            .select("id, user_id, schedule_blocks_mode, members_can_edit_blocks")
-            .eq("id", habitId).maybeSingle();
-        if (error || !habit) return null;
-        if (habit.user_id === userId) return { habit, isOwner: true };
-        const { data: membership, error: memberError } = await supabase.from("habit_members")
-            .select("status").eq("habit_id", habitId).eq("user_id", userId)
-            .eq("status", "accepted").maybeSingle();
-        return !memberError && membership ? { habit, isOwner: false } : null;
+        const access = await getHabitAccess(supabase, habitId, userId);
+        return access?.can_view ? { ...access, isOwner: access.is_owner } : null;
     };
     const blockUserId = (access, userId) =>
         access.habit.schedule_blocks_mode === "personal" ? userId : access.habit.user_id;
@@ -152,7 +146,7 @@ export default function (app, supabase) {
         }
     });
 
-    app.post("/schedule", authenticateUser(supabase), async (req, res) => {
+    app.post("/schedule", authenticateUser(supabase), requireHabitPermission(supabase, "edit_blocks"), async (req, res) => {
         const { habit_id, blocks, isSeparated } = req.body;
 
         if (!habit_id || !Array.isArray(blocks)) {
@@ -162,7 +156,7 @@ export default function (app, supabase) {
         try {
             const access = await habitAccess(habit_id, req.user.id);
             if (!access) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
-            if (!access.isOwner && access.habit.schedule_blocks_mode === "shared" && !access.habit.members_can_edit_blocks) {
+            if (!access.isOwner && access.habit.schedule_blocks_mode === "shared" && !access.can_edit_blocks) {
                 return res.status(403).json({ success: false, error: "Нет прав изменять общие блоки" });
             }
             const editorId = blockUserId(access, req.user.id);
@@ -204,7 +198,7 @@ export default function (app, supabase) {
         }
     });
 
-    app.post("/schedule/complete", authenticateUser(supabase), async (req, res) => {
+    app.post("/schedule/complete", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
         const { habit_id, blockId, date } = req.body;
         if (!isCalendarDate(date)) return res.status(400).json({ success: false, error: "Некорректная дата" });
 
@@ -254,7 +248,7 @@ export default function (app, supabase) {
                 .select("id")
                 .eq("habit_id", habitIdNum)
                 .eq("schedule_id", blockIdNum)
-                .eq("user_id", req.user.id)
+                .eq("user_id", access.progress_user_id)
                 .eq("date", date)
                 .single();
 
@@ -271,7 +265,7 @@ export default function (app, supabase) {
                     .insert({
                         habit_id: habitIdNum,
                         schedule_id: blockIdNum,
-                        user_id: req.user.id,
+                        user_id: access.progress_user_id,
                         date: date
                     });
                 if (insertError) throw insertError;
@@ -306,7 +300,7 @@ export default function (app, supabase) {
             const { data: week_start } = await supabase
                 .from("settings")
                 .select("week_start")
-                .eq("user_id", req.user.id)
+                .eq("user_id", access.progress_user_id)
                 .single();
 
             const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
@@ -321,7 +315,7 @@ export default function (app, supabase) {
                 .from("schedule_completions")
                 .select("schedule_id")
                 .eq("habit_id", habitIdNum)
-                .eq("user_id", req.user.id)
+                .eq("user_id", access.progress_user_id)
                 .eq("date", date);
 
             const completedIds = new Set((completedBlocks || []).map(c => c.schedule_id));
@@ -342,7 +336,7 @@ export default function (app, supabase) {
                 .from("habit_completions")
                 .select("id, is_user_marked")
                 .eq("habit_id", habitIdNum)
-                .eq("user_id", req.user.id)
+                .eq("user_id", access.progress_user_id)
                 .eq("completed_at", date)
                 .maybeSingle();
 
@@ -354,7 +348,7 @@ export default function (app, supabase) {
                     await supabase.from("habit_completions").insert({
                         habit_id: habitIdNum,
                         completed_at: date,
-                        user_id: req.user.id,
+                        user_id: access.progress_user_id,
                         is_user_marked: false  // авто-создание
                     });
                 }
@@ -401,7 +395,7 @@ export default function (app, supabase) {
                     created_at
                 `)
                 .eq("habit_id", habitId)
-                .eq("user_id", req.user.id)
+                .eq("user_id", access.progress_user_id)
                 .order("date", { ascending: true })
                 .order("created_at", { ascending: true });
 

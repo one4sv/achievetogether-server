@@ -1,65 +1,46 @@
 import { authenticateUser } from "../../middleware/token.js";
+import { requireHabitPermission } from "../../utils/habitAccess.js";
+import { isCalendarDate } from "../../utils/validation.js";
+import { broadcastHabitCommentUpdated } from "../../realtime/ws.js";
 
 export default function (app, supabase) {
-  app.post("/daycomment", authenticateUser(supabase), async (req, res) => {
-    const { id: user_id } = req.user;
-    const { habit_id, text, date } = req.body;
-
-    try {
-      const today = new Date().toLocaleDateString("en-CA", {
-        timeZone: "Europe/Moscow",
-      });
-      const targetDate = date && date.trim() !== "" ? date : today;
-
-      const { data: existingComment, error: selectError } = await supabase
-        .from("completions_comments")
-        .select("id")
-        .eq("habit_id", habit_id)
-        .eq("user_id", user_id)
-        .eq("date", targetDate)
-        .maybeSingle();
-
-      if (selectError) {
-        console.error("Ошибка проверки комментария:", selectError);
-        return res.status(500).json({ success: false, error: selectError.message });
-      }
-
-      if (existingComment) {
-        // Обновляем комментарий
-        const { error: updateError } = await supabase
-          .from("completions_comments")
-          .update({ comment: text })
-          .eq("id", existingComment.id);
-
-        if (updateError) {
-          console.error("Ошибка обновления комментария:", updateError);
-          return res.status(500).json({ success: false, error: updateError.message });
+    app.get("/habits/:id/day-comments", authenticateUser(supabase), requireHabitPermission(supabase, "view"), async (req, res) => {
+        const date = req.query.date || new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
+        if (!isCalendarDate(date)) return res.status(400).json({ success: false, error: "Некорректная дата" });
+        try {
+            const { data: comments, error } = await supabase.from("completions_comments")
+                .select("id, user_id, comment, date, created_at").eq("habit_id", req.params.id)
+                .eq("date", date).order("created_at", { ascending: true });
+            if (error) throw error;
+            const ids = [...new Set((comments || []).map(item => item.user_id))];
+            const { data: users, error: usersError } = ids.length ? await supabase.from("users")
+                .select("id, nick, username, avatar_url").in("id", ids) : { data: [], error: null };
+            if (usersError) throw usersError;
+            res.json({ success: true, comments: (comments || []).filter(item => item.comment?.trim()).map(item => ({
+                ...item, user: users.find(user => user.id === item.user_id) || null
+            })) });
+        } catch (error) {
+            console.error("Ошибка комментариев активности:", error);
+            res.status(500).json({ success: false, error: "Не удалось загрузить комментарии" });
         }
+    });
 
-        return res.status(200).json({ success: true, action: "updated" });
-      } else {
-        // Создаём новый комментарий
-        const { error: insertError } = await supabase
-          .from("completions_comments")
-          .insert([
-            {
-              habit_id,
-              user_id,
-              comment: text,
-              date: targetDate,
-            },
-          ]);
-
-        if (insertError) {
-          console.error("Ошибка вставки комментария:", insertError);
-          return res.status(500).json({ success: false, error: insertError.message });
+    app.post("/daycomment", authenticateUser(supabase), requireHabitPermission(supabase, "comment"), async (req, res) => {
+        const { habit_id, text, date } = req.body;
+        const targetDate = date || new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
+        if (typeof text !== "string" || text.length > 200 || !isCalendarDate(targetDate)) {
+            return res.status(400).json({ success: false, error: "Проверьте текст и дату комментария" });
         }
-
-        return res.status(200).json({ success: true, action: "inserted" });
-      }
-    } catch (err) {
-      console.error("Ошибка сервера:", err);
-      return res.status(500).json({ success: false, error: "Ошибка сервера" });
-    }
-  });
+        try {
+            const { error } = await supabase.rpc("save_habit_day_comment", {
+                p_actor: req.user.id, p_habit: Number(habit_id), p_date: targetDate, p_text: text
+            });
+            if (error) throw error;
+            void broadcastHabitCommentUpdated(supabase, habit_id, targetDate);
+            res.json({ success: true });
+        } catch (error) {
+            console.error("Ошибка сохранения комментария:", error);
+            res.status(error.code === "42501" ? 403 : 500).json({ success: false, error: "Не удалось сохранить комментарий" });
+        }
+    });
 }

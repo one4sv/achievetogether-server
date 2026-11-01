@@ -1,3 +1,4 @@
+import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { withRetry } from "../../utils/withRetry.js";
 
@@ -5,6 +6,7 @@ export default function (app, supabase) {
     app.get(
         "/habits/:id/stats",
         authenticateUser(supabase),
+        requireHabitPermission(supabase, "view"),
         async (req, res) => {
             const currentUserId = req.user?.id;
             const { id: habitId } = req.params;
@@ -33,13 +35,6 @@ export default function (app, supabase) {
                     return res.status(404).json({
                         success: false,
                         error: "Привычка не найдена"
-                    });
-                }
-
-                if (habit.user_id !== currentUserId) {
-                    return res.status(403).json({
-                        success: false,
-                        error: "Нет доступа"
                     });
                 }
 
@@ -75,6 +70,7 @@ export default function (app, supabase) {
                             .from("habit_completions")
                             .select("completed_at")
                             .eq("habit_id", habitId)
+                            .eq("user_id", req.habitAccess.progress_user_id)
                             .order("completed_at", {
                                 ascending: true
                             })
@@ -305,6 +301,7 @@ export default function (app, supabase) {
                                 .from("habit_counters")
                                 .select("count, created_at")
                                 .eq("habit_id", habitId)
+                            .eq("user_id", req.habitAccess.progress_user_id)
                                 .order("created_at", {
                                     ascending: true
                                 })
@@ -358,6 +355,7 @@ export default function (app, supabase) {
                                     "started_at, end_at, status"
                                 )
                                 .eq("habit_id", habitId)
+                            .eq("user_id", req.habitAccess.progress_user_id)
                                 .order("started_at", {
                                     ascending: true
                                 })
@@ -430,6 +428,7 @@ export default function (app, supabase) {
                                 .from("schedule_completions")
                                 .select("date, schedule_id")
                                 .eq("habit_id", habitId)
+                            .eq("user_id", req.habitAccess.progress_user_id)
                                 .order("date", {
                                     ascending: true
                                 })
