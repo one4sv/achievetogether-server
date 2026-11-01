@@ -129,29 +129,34 @@ export default function (app, supabase) {
             if (habitError) throw habitError;
             if (!habit) return res.status(404).json({ success: false });
             if (habit.user_id !== userId) return res.status(403).json({ success: false, error: "Только владелец может изменять привязку" });
+            let invitedPartner = false;
             if (chatId !== null) {
                 const { data: chat, error: chatError } = await supabase.from("chats")
                     .select("id, is_group").eq("id", chatId).maybeSingle();
                 if (chatError) throw chatError;
                 if (!chat || !chat.is_group) return res.status(400).json({ success: false, error: "Выберите беседу" });
                 const { data: member, error: memberError } = await supabase.from("chat_members")
-                    .select("id").eq("chat_id", chatId).eq("user_id", userId).maybeSingle();
+                    .select("id, is_blocked").eq("chat_id", chatId).eq("user_id", userId).maybeSingle();
                 if (memberError) throw memberError;
-                if (!member) return res.status(403).json({ success: false, error: "Вы не участник этой беседы" });
+                if (!member || member.is_blocked) return res.status(403).json({ success: false, error: "Вы не участник этой беседы" });
                 const { data: paired, error: pairError } = await supabase.from("habit_members")
-                    .select("user_id").eq("habit_id", habit.id).eq("status", "accepted")
+                    .select("user_id").eq("habit_id", habit.id).in("status", ["accepted", "pending"])
                     .neq("user_id", habit.user_id);
                 if (pairError) throw pairError;
                 const otherIds = (paired || []).map(item => item.user_id);
                 if (otherIds.length) {
                     const { data: inGroup, error: groupMemberError } = await supabase.from("chat_members")
-                        .select("user_id").eq("chat_id", chatId).in("user_id", otherIds).eq("is_blocked", false);
+                        .select("user_id, is_blocked").eq("chat_id", chatId).in("user_id", otherIds);
                     if (groupMemberError) throw groupMemberError;
+                    if ((inGroup || []).some(member => member.is_blocked)) {
+                        return res.status(403).json({ success: false, error: "Второй участник заблокирован в этой беседе" });
+                    }
                     const foundIds = new Set((inGroup || []).map(item => item.user_id));
                     const missing = otherIds.filter(id => !foundIds.has(id));
                     if (missing.length) {
                         try {
                             const result = await inviteGroupUsers(supabase, userId, chatId, missing);
+                            invitedPartner = !!result.invited || !!result.already;
                             if (result.blocked || (result.added || 0) + (result.invited || 0) + (result.already || 0) < missing.length) {
                                 return res.status(403).json({ success: false, error: "Не удалось пригласить второго участника в беседу. Проверьте права и приватность." });
                             }
@@ -167,7 +172,7 @@ export default function (app, supabase) {
                 .update({ chat_id: chatId, ...(chatId === null ? Object.fromEntries(["complete_permission", "comment_permission", "edit_blocks_permission", "edit_info_permission", "invite_permission"].filter(key => habit[key] === "roles").map(key => [key, key === "complete_permission" || key === "comment_permission" ? "members" : "owner"])) : {}) }).eq("id", habit.id).eq("user_id", userId)
                 .select("id, chat_id").single();
             if (error) throw error;
-            return res.json({ success: true, habit: updated });
+            return res.json({ success: true, habit: updated, invited_partner: invitedPartner });
         } catch (error) {
             console.error("Ошибка привязки активности к беседе:", error);
             return res.status(500).json({ success: false, error: "Не удалось изменить привязку" });

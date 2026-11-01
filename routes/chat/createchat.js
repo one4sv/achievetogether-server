@@ -63,7 +63,7 @@ export default function (app, supabase) {
 
       if (activity) {
         const { data: accepted, error: acceptedError } = await supabase.from("habit_members")
-          .select("user_id").eq("habit_id", activity.id).eq("status", "accepted");
+          .select("user_id").eq("habit_id", activity.id).in("status", ["accepted", "pending"]);
         if (acceptedError) throw acceptedError;
         parsedMembers = (accepted || []).map(item => item.user_id);
       }
