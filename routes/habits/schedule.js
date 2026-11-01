@@ -126,6 +126,11 @@ export default function (app, supabase) {
 
             if (error) throw error;
 
+            const authorIds = [...new Set((blocks || []).map(b => b.created_by).filter(Boolean))];
+            const { data: authors, error: authorError } = authorIds.length
+                ? await supabase.from("users").select("id, nick, username").in("id", authorIds)
+                : { data: [], error: null };
+            if (authorError) throw authorError;
             res.json({
                 success: true,
                 blocks: (blocks ?? []).map(b => ({
@@ -134,7 +139,10 @@ export default function (app, supabase) {
                     isSeparator: Boolean(b.isSeparator),
                     name: b.name || "",
                     start_time: b.start_time || "",
-                    end_time: b.end_time || ""
+                    end_time: b.end_time || "",
+                    created_by: b.created_by || null,
+                    creator_name: (authors || []).find(u => u.id === b.created_by)?.username
+                        || (authors || []).find(u => u.id === b.created_by)?.nick || null
                 })),
                 settings:settings ?? null,
             });
@@ -401,9 +409,18 @@ export default function (app, supabase) {
 
             if (completionsError) throw completionsError;
 
+            const actorIds = [...new Set((completions || []).map(c => c.actor_user_id).filter(Boolean))];
+            const { data: actors, error: actorsError } = actorIds.length
+                ? await supabase.from("users").select("id, nick, username").in("id", actorIds)
+                : { data: [], error: null };
+            if (actorsError) throw actorsError;
             res.json({
                 success: true,
-                completions: completions || []
+                completions: (completions || []).map(c => ({
+                    ...c,
+                    actor_name: (actors || []).find(u => u.id === c.actor_user_id)?.username
+                        || (actors || []).find(u => u.id === c.actor_user_id)?.nick || null
+                }))
             });
         } catch (err) {
             console.error("Ошибка получения завершений расписания:", err);

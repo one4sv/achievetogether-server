@@ -280,6 +280,16 @@ export default function (app, supabase) {
                 }
             // }
 
+            const creatorIds = [...new Set(checklist.map(item => item.created_by).filter(Boolean))];
+            const { data: creators, error: creatorError } = creatorIds.length
+                ? await supabase.from("users").select("id, nick, username").in("id", creatorIds)
+                : { data: [], error: null };
+            if (creatorError) throw creatorError;
+            checklist = checklist.map(item => ({
+                ...item,
+                creator_name: (creators || []).find(u => u.id === item.created_by)?.username
+                    || (creators || []).find(u => u.id === item.created_by)?.nick || null
+            }));
             res.json({
                 success: true,
                 habit: { ...habit, access },
