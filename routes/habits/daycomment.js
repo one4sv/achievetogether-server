@@ -28,9 +28,26 @@ export default function (app, supabase) {
                 user_id: item.actor_user_id || (shared ? null : item.user_id),
                 created_at: item.created_at
             }));
+            const { data: scheduleActions, error: scheduleActionsError } = await supabase
+                .from("schedule_completions")
+                .select("id, schedule_id, user_id, actor_user_id, created_at")
+                .eq("habit_id", req.params.id).eq("date", date);
+            if (scheduleActionsError) throw scheduleActionsError;
+            const scheduleIds = [...new Set((scheduleActions || []).map(item => item.schedule_id))];
+            const { data: taskNames, error: taskNamesError } = scheduleIds.length
+                ? await supabase.from("schedule").select("id, name").in("id", scheduleIds)
+                : { data: [], error: null };
+            if (taskNamesError) throw taskNamesError;
+            const taskActions = (scheduleActions || []).map(item => ({
+                id: item.id,
+                created_at: item.created_at,
+                user_id: item.actor_user_id || (shared ? null : item.user_id),
+                name: (taskNames || []).find(task => task.id === item.schedule_id)?.name || "Задача"
+            }));
             const ids = [...new Set([
                 ...(comments || []).map(item => item.user_id),
-                ...completed.map(item => item.user_id)
+                ...completed.map(item => item.user_id),
+                ...taskActions.map(item => item.user_id)
             ].filter(Boolean))];
             const { data: users, error: usersError } = ids.length ? await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", ids) : { data: [], error: null };
@@ -41,6 +58,10 @@ export default function (app, supabase) {
                     ...item, user: users.find(user => user.id === item.user_id) || null
                 })),
                 completions: completed.map(item => ({
+                    ...item,
+                    user: users.find(user => user.id === item.user_id) || null
+                })),
+                taskCompletions: taskActions.map(item => ({
                     ...item,
                     user: users.find(user => user.id === item.user_id) || null
                 }))

@@ -1,0 +1,1 @@
+-- Applied in Supabase as shared_task_actor_columns_20261102\nalter table public.schedule add column if not exists created_by uuid;\nalter table public.schedule_completions add column if not exists actor_user_id uuid;\nalter table public.checklist_completions add column if not exists created_by uuid;\n

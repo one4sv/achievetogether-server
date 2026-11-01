@@ -267,7 +267,7 @@ export default function (app, supabase) {
                 const { data: completions, error: complError } = await withRetry(() =>
                     supabase
                         .from("checklist_completions")
-                        .select("id, name, start_time, end_time, date, habit_id")
+                        .select("id, name, start_time, end_time, date, habit_id, created_by")
                         .eq("habit_id", habitId)
                         .eq("user_id", progressUserId || habit.user_id)
                         .order("start_time", { ascending: true })

@@ -32,6 +32,7 @@ export default function (app, supabase) {
                     .insert({
                         ...input,
                         habit_id,
+                        created_by: userId,
                         user_id: req.habitAccess.progress_user_id
                     })
                     .select()

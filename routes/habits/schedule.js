@@ -112,7 +112,7 @@ export default function (app, supabase) {
 
             const { data: blocks, error } = await supabase
                 .from("schedule")
-                .select("id, day_of_week, isSeparator, name, start_time, end_time")
+                .select("id, day_of_week, isSeparator, name, start_time, end_time, created_by")
                 .eq("habit_id", habitId)
                 .eq("user_id", blockUserId(access, req.user.id))
                 .order("day_of_week")
@@ -184,7 +184,7 @@ export default function (app, supabase) {
                     if (error) throw error;
                 } else if (name) {
                     const { error } = await supabase.from("schedule")
-                        .insert([{ habit_id, user_id: editorId, ...payload }]);
+                        .insert([{ habit_id, user_id: editorId, created_by: req.user.id, ...payload }]);
                     if (error) throw error;
                 }
             }
@@ -264,6 +264,7 @@ export default function (app, supabase) {
                         habit_id: habitIdNum,
                         schedule_id: blockIdNum,
                         user_id: access.progress_user_id,
+                        actor_user_id: req.user.id,
                         date: date
                     });
                 if (insertError) throw insertError;
@@ -390,7 +391,8 @@ export default function (app, supabase) {
                     habit_id,
                     schedule_id,
                     date,
-                    created_at
+                    created_at,
+                    actor_user_id
                 `)
                 .eq("habit_id", habitId)
                 .eq("user_id", access.progress_user_id)
