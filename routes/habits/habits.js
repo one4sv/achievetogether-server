@@ -1,4 +1,4 @@
-import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { filterBlockedHabitMemberships, getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { withRetry } from "../../utils/withRetry.js";
 
@@ -17,7 +17,7 @@ export default function (app, supabase) {
                 .eq("user_id", userId).eq("status", "accepted");
             if (membersError) throw membersError;
             const acceptedIds = (memberships || []).map(member => member.habit_id);
-            const { data: habitsArr, error: habitsError } = await withRetry(() =>
+            const { data: habitsRaw, error: habitsError } = await withRetry(() =>
                 supabase
                     .from("habits")
                     .select(`
@@ -36,6 +36,8 @@ export default function (app, supabase) {
                 console.error("cause:", habitsError.cause);
                 return res.status(500).json({ success: false, error: "Ошибка получения привычек" });
             }
+
+            const habitsArr = await filterBlockedHabitMemberships(supabase, habitsRaw, userId);
 
             if (!habitsArr || habitsArr.length === 0) {
                 return res.json({ success: true, habitsArr: [] });

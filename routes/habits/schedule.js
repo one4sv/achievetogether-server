@@ -1,4 +1,4 @@
-import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { filterBlockedHabitMemberships, getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { isCalendarDate } from "../../utils/validation.js";
 import { isEvenScheduleWeek } from "../../utils/scheduleWeek.js";
@@ -19,15 +19,13 @@ export default function (app, supabase) {
                 .select("habit_id").eq("user_id", user_id).eq("status", "accepted");
             if (membershipError) throw membershipError;
             const sharedIds = (memberships || []).map(m => m.habit_id);
-            const { data: habits, error: habitError } = await supabase
+            const { data: habitsRaw, error: habitError } = await supabase
                 .from("habits")
                 .select("id, user_id, schedule_blocks_mode")
                 .or(`user_id.eq.${user_id}${sharedIds.length ? `,id.in.(${sharedIds.join(",")})` : ""}`);
             if (habitError) throw habitError;
 
-            if (!habits) {
-                return res.json({ success:true, message:"nohabits" })
-            }
+            const habits = await filterBlockedHabitMemberships(supabase, habitsRaw, user_id);
             const habitIds = habits.map(h => h.id);
             if (!habitIds.length) return res.json({ success: true, schedules: {}, settings: {} });
 

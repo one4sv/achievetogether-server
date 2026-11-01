@@ -1,4 +1,4 @@
-import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { filterBlockedHabitMemberships, getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
@@ -7,51 +7,42 @@ export default function (app, supabase) {
     const { id: user_id } = req.user;
 
     try {
-      // Берём все даты выполнений
-      const { data: completions, error: errorComp } = await supabase
-        .from("habit_completions")
-        .select("completed_at, habit_id, created_at")
-        .eq("user_id", user_id);
+      const { data: memberships, error: membersError } = await supabase
+        .from("habit_members").select("habit_id")
+        .eq("user_id", user_id).eq("status", "accepted");
+      if (membersError) throw membersError;
+      const memberIds = (memberships || []).map(item => item.habit_id);
+      const { data: allHabits, error: habitsError } = await supabase
+        .from("habits").select("id, name, ongoing, user_id, chat_id, metric_progress_mode")
+        .or(`user_id.eq.${user_id}${memberIds.length ? `,id.in.(${memberIds.join(",")})` : ""}`);
+      if (habitsError) throw habitsError;
+      const habits = await filterBlockedHabitMemberships(supabase, allHabits, user_id);
+      if (!habits.length) return res.json({ success: true, calendar: [] });
+      const habitIds = habits.map(habit => habit.id);
+      const habitsById = new Map(habits.map(habit => [habit.id, habit]));
+      const progressIds = [...new Set([
+        user_id,
+        ...habits.filter(habit => habit.metric_progress_mode === "shared").map(habit => habit.user_id)
+      ])];
 
-      if (errorComp) {
-        console.log(errorComp);
-        return res.status(500).json({ success: false, error: "Ошибка при получении дат выполнения" });
-      }
+      const { data: allCompletions, error: errorComp } = await supabase
+        .from("habit_completions").select("completed_at, habit_id, user_id, created_at")
+        .in("habit_id", habitIds).in("user_id", progressIds);
+      if (errorComp) throw errorComp;
+      const completions = (allCompletions || []).filter(item => {
+        const habit = habitsById.get(item.habit_id);
+        return habit && item.user_id === (habit.metric_progress_mode === "shared" ? habit.user_id : user_id);
+      });
 
-      // Берём все привычки
-      const { data: habits, error: errorHabit } = await supabase
-        .from("habits")
-        .select("id, name, ongoing")
-        .eq("user_id", user_id);
-
-      if (errorHabit) {
-        console.log(errorHabit);
-        return res.status(500).json({ success: false, error: "Ошибка при получении привычек" });
-      }
-
-      // Берём все комментарии пользователя
       const { data: comments, error: errorComments } = await supabase
-        .from("completions_comments")
-        .select("habit_id, comment, date")
-        .eq("user_id", user_id);
-
-      if (errorComments) {
-        console.log(errorComments);
-        return res.status(500).json({ success: false, error: "Ошибка при получении комментариев" });
-      }
+        .from("completions_comments").select("habit_id, comment, date")
+        .eq("user_id", user_id).in("habit_id", habitIds);
+      if (errorComments) throw errorComments;
 
       const { data: planned, error: errorPlanned } = await supabase
-        .from("habit_planned")
-        .select("habit_id, planned_at")
-        .in("habit_id", (habits ?? []).map(h => h.id));
-
-      if (errorPlanned) {
-        console.log(errorPlanned);
-        return res.status(500).json({
-          success: false,
-          error: "Ошибка при получении запланированных дней"
-        });
-      }
+        .from("habit_planned").select("habit_id, planned_at")
+        .in("habit_id", habitIds);
+      if (errorPlanned) throw errorPlanned;
 
       // Собираем календарь
       const mapped = [

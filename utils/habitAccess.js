@@ -70,3 +70,18 @@ export function requireHabitPermission(supabase, action, getId = req => req.body
         }
     };
 }
+
+export async function filterBlockedHabitMemberships(supabase, habits, userId) {
+    const chatIds = [...new Set((habits || [])
+        .filter(habit => habit.user_id !== userId && habit.chat_id)
+        .map(habit => habit.chat_id))];
+    if (!chatIds.length) return habits || [];
+    const { data, error } = await supabase.from("chat_members")
+        .select("chat_id").eq("user_id", userId).eq("is_blocked", true)
+        .in("chat_id", chatIds);
+    if (error) throw error;
+    const blocked = new Set((data || []).map(member => member.chat_id));
+    return (habits || []).filter(habit =>
+        habit.user_id === userId || !habit.chat_id || !blocked.has(habit.chat_id)
+    );
+}
