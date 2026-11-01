@@ -44,10 +44,22 @@ export default function (app, supabase) {
                 user_id: item.actor_user_id || (shared ? null : item.user_id),
                 name: (taskNames || []).find(task => task.id === item.schedule_id)?.name || "Задача"
             }));
+            const { data: checklistActions, error: checklistActionsError } = await supabase
+                .from("checklist_completions")
+                .select("id, name, completed_by, completed_at")
+                .eq("habit_id", req.params.id).eq("date", date).not("completed_at", "is", null);
+            if (checklistActionsError) throw checklistActionsError;
+            const checklistEvents = (checklistActions || []).map(item => ({
+                id: item.id,
+                created_at: item.completed_at,
+                user_id: item.completed_by,
+                name: item.name || "Задача"
+            }));
             const ids = [...new Set([
                 ...(comments || []).map(item => item.user_id),
                 ...completed.map(item => item.user_id),
-                ...taskActions.map(item => item.user_id)
+                ...taskActions.map(item => item.user_id),
+                ...checklistEvents.map(item => item.user_id)
             ].filter(Boolean))];
             const { data: users, error: usersError } = ids.length ? await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", ids) : { data: [], error: null };
@@ -61,7 +73,7 @@ export default function (app, supabase) {
                     ...item,
                     user: users.find(user => user.id === item.user_id) || null
                 })),
-                taskCompletions: taskActions.map(item => ({
+                taskCompletions: [...taskActions, ...checklistEvents].map(item => ({
                     ...item,
                     user: users.find(user => user.id === item.user_id) || null
                 }))

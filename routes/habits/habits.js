@@ -267,7 +267,7 @@ export default function (app, supabase) {
                 const { data: completions, error: complError } = await withRetry(() =>
                     supabase
                         .from("checklist_completions")
-                        .select("id, name, start_time, end_time, date, habit_id, created_by")
+                        .select("id, name, start_time, end_time, date, habit_id, created_by, completed_by, completed_at")
                         .eq("habit_id", habitId)
                         .eq("user_id", progressUserId || habit.user_id)
                         .order("start_time", { ascending: true })
@@ -280,7 +280,7 @@ export default function (app, supabase) {
                 }
             // }
 
-            const creatorIds = [...new Set(checklist.map(item => item.created_by).filter(Boolean))];
+            const creatorIds = [...new Set(checklist.flatMap(item => [item.created_by, item.completed_by]).filter(Boolean))];
             const { data: creators, error: creatorError } = creatorIds.length
                 ? await supabase.from("users").select("id, nick, username").in("id", creatorIds)
                 : { data: [], error: null };
@@ -288,7 +288,9 @@ export default function (app, supabase) {
             checklist = checklist.map(item => ({
                 ...item,
                 creator_name: (creators || []).find(u => u.id === item.created_by)?.username
-                    || (creators || []).find(u => u.id === item.created_by)?.nick || null
+                    || (creators || []).find(u => u.id === item.created_by)?.nick || null,
+                completer_name: (creators || []).find(u => u.id === item.completed_by)?.username
+                    || (creators || []).find(u => u.id === item.completed_by)?.nick || null
             }));
             res.json({
                 success: true,

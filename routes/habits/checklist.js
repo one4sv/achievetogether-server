@@ -57,6 +57,32 @@ export default function (app, supabase) {
         return data?.habit_id;
     };
 
+    app.post("/checklist/toggle", authenticateUser(supabase), requireHabitPermission(supabase, "complete", checklistHabitId), async (req, res) => {
+        const id = Number(req.body?.id);
+        if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ success: false, error: "Неверный ID задачи" });
+        try {
+            const { data: task, error: fetchError } = await supabase.from("checklist_completions")
+                .select("id, habit_id, user_id, completed_by, completed_at")
+                .eq("id", id).eq("user_id", req.habitAccess.progress_user_id).maybeSingle();
+            if (fetchError) throw fetchError;
+            if (!task) return res.status(404).json({ success: false, error: "Задача не найдена" });
+            const complete = !task.completed_at;
+            const { data, error } = await supabase.from("checklist_completions")
+                .update({
+                    completed_by: complete ? req.user.id : null,
+                    completed_at: complete ? new Date().toISOString() : null
+                })
+                .eq("id", id).eq("user_id", req.habitAccess.progress_user_id)
+                .eq("habit_id", req.habitAccess.habit.id)
+                .select("id, completed_at, completed_by").single();
+            if (error) throw error;
+            res.json({ success: true, task: data });
+        } catch (err) {
+            console.error("Failed to toggle checklist task:", err);
+            res.status(500).json({ success: false, error: "Не удалось отметить задачу" });
+        }
+    });
+
     app.post("/checklist/delete", authenticateUser(supabase), requireHabitPermission(supabase, "complete", checklistHabitId), async (req, res) => {
         const userId = req.user?.id;
         const { id } = req.body;
