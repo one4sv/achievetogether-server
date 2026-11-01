@@ -38,7 +38,7 @@ export async function getChatMessages(supabase, chatId, userId, options = {}) {
       .select(`
         id, sender_id, content, created_at, read_by, reactions,
         message_files (file_url, file_name, file_type),
-        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id
+        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id, habit_invite_habit_id, habit_invite_recipient_id
       `)
       .eq("chat_id", chatId)
       .not("hidden", "cs", `{"${userId}"}`)
@@ -52,7 +52,7 @@ export async function getChatMessages(supabase, chatId, userId, options = {}) {
       .select(`
         id, sender_id, content, created_at, read_by, reactions,
         message_files (file_url, file_name, file_type),
-        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id
+        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id, habit_invite_habit_id, habit_invite_recipient_id
       `)
       .eq("chat_id", chatId)
       .not("hidden", "cs", `{"${userId}"}`)
@@ -81,7 +81,7 @@ export async function getChatMessages(supabase, chatId, userId, options = {}) {
       .select(`
         id, sender_id, content, created_at, read_by, reactions,
         message_files (file_url, file_name, file_type),
-        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id
+        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id, habit_invite_habit_id, habit_invite_recipient_id
       `)
       .eq("chat_id", chatId)
       .not("hidden", "cs", `{"${userId}"}`)
@@ -99,7 +99,7 @@ export async function getChatMessages(supabase, chatId, userId, options = {}) {
       .select(`
         id, sender_id, content, created_at, read_by, reactions,
         message_files (file_url, file_name, file_type),
-        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id
+        answer_id, edited, redirected_id, show_names, is_system, is_pinned, target_id, habit_invite_habit_id, habit_invite_recipient_id
       `)
       .eq("chat_id", chatId)
       .not("hidden", "cs", `{"${userId}"}`)

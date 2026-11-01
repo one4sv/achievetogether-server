@@ -49,7 +49,7 @@ export async function broadcastNewMessage(chat_id, message) {
       const chatNote = member.note ?? true;
       console.log("UserId:", userId, "allNote:", allNote, "newMessNote:", newMessNote, "chatNote:", chatNote);
      
-      if (allNote && newMessNote && chatNote) {
+      if ((allNote && newMessNote && chatNote) || message.habit_invite_habit_id) {
         const sockets = clientsMap.get(userId);
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
@@ -60,7 +60,7 @@ export async function broadcastNewMessage(chat_id, message) {
               message,
               nick: senderData?.nick || null,
               username: senderData?.username || null,
-              is_note: chatNote,
+              is_note: allNote && newMessNote && chatNote,
               is_group: chat.is_group
             }));
           }
@@ -72,7 +72,7 @@ export async function broadcastNewMessage(chat_id, message) {
   }
 }
 
-export function broadcastMessageEdited(chat_id, message) {
+export function broadcastMessageEdited(chat_id, message, eventType = "MESSAGE_EDITED") {
   supabaseGlobal
     .from("chat_members")
     .select("user_id")
@@ -83,7 +83,7 @@ export function broadcastMessageEdited(chat_id, message) {
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
             s.send(JSON.stringify({
-              type: "MESSAGE_EDITED",
+              type: eventType,
               chatId: chat_id,
               message
             }));

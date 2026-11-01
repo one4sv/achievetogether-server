@@ -1,6 +1,18 @@
 import { authenticateUser } from "../../middleware/token.js";
+import { publishHabitInvitation, sendInvitationError, readHabitInvitation } from "../../services/habitInvitations.js";
 
 export default function (app, supabase) {
+    app.get("/messages/:id/habit-invitation", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false });
+        try {
+            const invitation = await readHabitInvitation(supabase, Number(req.params.id), req.user.id);
+            if (!invitation) return res.status(404).json({ success: false, error: "Приглашение недоступно" });
+            return res.json({ success: true, invitation });
+        } catch (error) {
+            return sendInvitationError(res, error);
+        }
+    });
+
     app.get("/habits/:id/activity", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false });
         try {
@@ -233,26 +245,15 @@ export default function (app, supabase) {
             if (target?.id === habit.user_id) return res.status(400).json({ success: false });
             if (targetError) throw targetError;
             if (!target) return res.status(404).json({ success: false });
-            const { data: recipientSettings, error: settingsError } = await supabase.from("settings")
-                .select("private").eq("user_id", target.id).maybeSingle();
-            if (settingsError) throw settingsError;
-            const privacy = recipientSettings?.private || {};
-            const exception = privacy.activity_invite_exceptions?.[req.user.id];
-            if (exception === "deny" || (exception !== "allow" && privacy.activity_invites === "nobody")) {
-                return res.status(403).json({ success: false, error: "Пользователь ограничил приглашения в активности" });
-            }
-            const { data: existing, error: existingError } = await supabase.from("habit_members")
-                .select("status").eq("habit_id", habit.id).eq("user_id", target.id).maybeSingle();
-            if (existingError) throw existingError;
-            if (existing?.status === "accepted" || existing?.status === "pending") {
-                return res.status(409).json({ success: false, error: "Already invited" });
-            }
-            const { error } = await supabase.from("habit_members").upsert({
-                habit_id: habit.id, user_id: target.id, invited_by: req.user.id,
-                status: "pending", updated_at: new Date().toISOString()
-            }, { onConflict: "habit_id,user_id" });
-            if (error) throw error;
-            res.json({ success: true });
+            const { data: result, error } = await supabase.rpc("send_habit_invitation", {
+                p_actor: req.user.id,
+                p_habit: habit.id,
+                p_target: target.id
+            });
+            if (error) return sendInvitationError(res, error);
+            if (result.message_id && !result.already_invited) await publishHabitInvitation(supabase, result.message_id);
+            return res.json({ success: true, ...result });
+
         } catch (error) {
             console.error("Ошибка приглашения участника:", error);
             res.status(500).json({ success: false });
@@ -264,15 +265,19 @@ export default function (app, supabase) {
         const status = req.body?.status;
         if (!["accepted", "declined"].includes(status)) return res.status(400).json({ success: false });
         try {
-            const { data: member, error: findError } = await supabase.from("habit_members")
-                .select("status").eq("habit_id", req.params.id).eq("user_id", req.user.id).maybeSingle();
-            if (findError) throw findError;
-            if (!member || member.status !== "pending") return res.status(409).json({ success: false });
-            const { error } = await supabase.from("habit_members").update({
-                status, updated_at: new Date().toISOString()
-            }).eq("habit_id", req.params.id).eq("user_id", req.user.id).eq("status", "pending");
-            if (error) throw error;
-            res.json({ success: true });
+            const messageId = req.body?.message_id;
+            if (messageId !== undefined && (!Number.isSafeInteger(messageId) || messageId <= 0)) {
+                return res.status(400).json({ success: false });
+            }
+            const { data: result, error } = await supabase.rpc("respond_habit_invitation", {
+                p_actor: req.user.id,
+                p_habit: Number(req.params.id),
+                p_status: status,
+                p_message: messageId ?? null
+            });
+            if (error) return sendInvitationError(res, error);
+            if (result.message_id) await publishHabitInvitation(supabase, result.message_id, true);
+            return res.json({ success: true, ...result });
         } catch (error) {
             console.error("Ошибка ответа на приглашение:", error);
             res.status(500).json({ success: false });
@@ -289,9 +294,13 @@ export default function (app, supabase) {
             if (habit.user_id !== req.user.id && req.params.userId !== req.user.id) {
                 return res.status(403).json({ success: false });
             }
+            const { data: removed, error: removalError } = await supabase.from("habit_members")
+                .select("invitation_message_id").eq("habit_id", req.params.id).eq("user_id", req.params.userId).maybeSingle();
+            if (removalError) throw removalError;
             const { error } = await supabase.from("habit_members").delete()
                 .eq("habit_id", req.params.id).eq("user_id", req.params.userId);
             if (error) throw error;
+            if (removed?.invitation_message_id) await publishHabitInvitation(supabase, removed.invitation_message_id, true);
             res.json({ success: true });
         } catch (error) {
             console.error("Ошибка удаления участника:", error);
