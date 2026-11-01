@@ -12,13 +12,39 @@ export default function (app, supabase) {
                 .select("id, user_id, comment, date, created_at").eq("habit_id", req.params.id)
                 .eq("date", date).order("created_at", { ascending: true });
             if (error) throw error;
-            const ids = [...new Set((comments || []).map(item => item.user_id))];
+            // A completion belongs to the progress owner in shared mode,
+            // but the person who pressed Done is recorded separately.
+            const { data: completions, error: completionsError } = await supabase
+                .from("habit_completions")
+                .select("id, user_id, actor_user_id, completed_at, created_at")
+                .eq("habit_id", req.params.id)
+                .eq("completed_at", date)
+                .eq("is_user_marked", true)
+                .order("created_at", { ascending: false });
+            if (completionsError) throw completionsError;
+            const shared = req.habitAccess.habit.metric_progress_mode === "shared";
+            const completed = (completions || []).map(item => ({
+                id: item.id,
+                user_id: item.actor_user_id || (shared ? null : item.user_id),
+                created_at: item.created_at
+            }));
+            const ids = [...new Set([
+                ...(comments || []).map(item => item.user_id),
+                ...completed.map(item => item.user_id)
+            ].filter(Boolean))];
             const { data: users, error: usersError } = ids.length ? await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", ids) : { data: [], error: null };
             if (usersError) throw usersError;
-            res.json({ success: true, comments: (comments || []).filter(item => item.comment?.trim()).map(item => ({
-                ...item, user: users.find(user => user.id === item.user_id) || null
-            })) });
+            res.json({
+                success: true,
+                comments: (comments || []).filter(item => item.comment?.trim()).map(item => ({
+                    ...item, user: users.find(user => user.id === item.user_id) || null
+                })),
+                completions: completed.map(item => ({
+                    ...item,
+                    user: users.find(user => user.id === item.user_id) || null
+                }))
+            });
         } catch (error) {
             console.error("Ошибка комментариев активности:", error);
             res.status(500).json({ success: false, error: "Не удалось загрузить комментарии" });

@@ -1,5 +1,6 @@
 import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
+import { broadcastHabitCommentUpdated } from "../../realtime/ws.js";
 
 export default function (app, supabase) {
   app.post("/markdone", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
@@ -41,6 +42,7 @@ export default function (app, supabase) {
           return res.status(500).json({ success: false, error: deleteError.message });
         }
 
+        void broadcastHabitCommentUpdated(supabase, habit_id, targetDate);
         return res.status(200).json({ success: true, action: "deleted" });
       } else {
         const { data, error: insertError } = await supabase
@@ -49,6 +51,7 @@ export default function (app, supabase) {
             {
               habit_id,
               user_id: progressUserId,
+              actor_user_id: user_id,
               completed_at: targetDate,
             },
           ]);
@@ -58,6 +61,7 @@ export default function (app, supabase) {
           return res.status(500).json({ success: false, error: insertError.message });
         }
 
+        void broadcastHabitCommentUpdated(supabase, habit_id, targetDate);
         return res.status(200).json({ success: true, action: "inserted", data });
       }
     } catch (err) {
