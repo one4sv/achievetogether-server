@@ -209,16 +209,22 @@ export default function (app, supabase) {
             const access = await getHabitAccess(supabase, req.params.id, req.user.id);
             if (!access?.can_view) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
             const habit = access.habit;
-            const { data: members, error } = access.is_member ? await supabase.from("habit_members")
-                .select("user_id, status, invited_by, created_at").eq("habit_id", habit.id) : { data: [], error: null };
+            const { data: allMembers, error } = await supabase.from("habit_members")
+                .select("user_id, status, invited_by, created_at").eq("habit_id", habit.id);
             if (error) throw error;
-            const userIds = [...new Set([habit.user_id, ...(members || []).map(member => member.user_id)])];
+            const { data: blocked, error: blockedError } = habit.chat_id
+                ? await supabase.from("chat_members")
+                    .select("user_id").eq("chat_id", habit.chat_id).eq("is_blocked", true)
+                : { data: [], error: null };
+            if (blockedError) throw blockedError;
+            const blockedIds = new Set((blocked || []).map(member => member.user_id));
+            const visibleMembers = (allMembers || []).filter(member => !blockedIds.has(member.user_id));
+            const members = access.is_member ? visibleMembers : [];
+            const userIds = [...new Set([habit.user_id, ...members.map(member => member.user_id)])];
             const { data: users, error: usersError } = await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", userIds);
             if (usersError) throw usersError;
-            const { count, error: countError } = await supabase.from("habit_members")
-                .select("user_id", { count: "exact", head: true }).eq("habit_id", habit.id).eq("status", "accepted");
-            if (countError) throw countError;
+            const count = visibleMembers.filter(member => member.status === "accepted").length;
             let chat = null;
             let myRole = null;
             if (habit.chat_id && access.is_member) {
