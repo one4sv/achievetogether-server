@@ -38,22 +38,41 @@ export default function (app, supabase) {
       }
 
       let parsedMembers = [];
+      const activityId = req.body.habit_id === undefined ? null : Number(req.body.habit_id);
+      if (activityId !== null && (!Number.isSafeInteger(activityId) || activityId <= 0)) {
+        return res.status(400).json({ success: false, error: "Некорректная активность" });
+      }
+      let activity = null;
+      if (activityId !== null) {
+        const { data: found, error: activityError } = await supabase.from("habits")
+          .select("id, user_id, chat_id").eq("id", activityId).maybeSingle();
+        if (activityError) throw activityError;
+        if (!found) return res.status(404).json({ success: false, error: "Активность не найдена" });
+        if (found.user_id !== creatorId) return res.status(403).json({ success: false, error: "Только владелец может связать активность с беседой" });
+        if (found.chat_id) return res.status(400).json({ success: false, error: "Активность уже привязана к беседе" });
+        activity = found;
+      }
       try {
         parsedMembers = JSON.parse(members || "[]");
-        if (!validUserIds(parsedMembers)) {
-          return res.status(400).json({ success: false, error: "Выберите хотя бы одного участника" });
+        if (!Array.isArray(parsedMembers) || (parsedMembers.length && !validUserIds(parsedMembers))) {
+          return res.status(400).json({ success: false, error: "Некорректный список участников" });
         }
       } catch (err) {
         return res.status(400).json({ success: false, error: "Некорректный список участников" });
       }
 
+      if (activity) {
+        const { data: accepted, error: acceptedError } = await supabase.from("habit_members")
+          .select("user_id").eq("habit_id", activity.id).eq("status", "accepted");
+        if (acceptedError) throw acceptedError;
+        parsedMembers = (accepted || []).map(item => item.user_id);
+      }
       parsedMembers = [...new Set(parsedMembers)].filter(id => id !== creatorId);
-      if (!parsedMembers.length) return res.status(400).json({ success: false, error: "Выберите другого участника" });
+      if (!activity && !parsedMembers.length) return res.status(400).json({ success: false, error: "Выберите другого участника" });
 
-      const { data: existingUsers, error: usersError } = await supabase
-        .from("users")
-        .select("id")
-        .in("id", parsedMembers);
+      const { data: existingUsers, error: usersError } = parsedMembers.length
+        ? await supabase.from("users").select("id").in("id", parsedMembers)
+        : { data: [], error: null };
 
       if (usersError || !existingUsers || existingUsers.length !== parsedMembers.length) {
         return res.status(404).json({ success: false, error: "Один или несколько участников не найдены" });
@@ -207,9 +226,20 @@ export default function (app, supabase) {
         is_system: true,
       });
 
-      let invitations;
+      let invitations = { added: 0, invited: 0, blocked: 0, already: 0 };
       try {
-        invitations = await inviteGroupUsers(supabase, creatorId, chatId, parsedMembers);
+        if (parsedMembers.length) {
+          invitations = await inviteGroupUsers(supabase, creatorId, chatId, parsedMembers);
+          if (activity && (invitations.blocked || (invitations.added || 0) + (invitations.invited || 0) + (invitations.already || 0) < parsedMembers.length)) {
+            throw Object.assign(new Error("Не удалось пригласить участника активности"), { code: "42501" });
+          }
+        }
+        if (activity) {
+          const { data: linked, error: linkError } = await supabase.from("habits")
+            .update({ chat_id: chatId }).eq("id", activity.id).eq("user_id", creatorId)
+            .is("chat_id", null).select("id").maybeSingle();
+          if (linkError || !linked) throw linkError || Object.assign(new Error("Активность уже привязана к другой беседе"), { code: "22023" });
+        }
       } catch (error) {
         await supabase.from("chats").delete().eq("id", chatId);
         throw error;
@@ -217,7 +247,7 @@ export default function (app, supabase) {
       res.json({ success: true, chat_id: chatId, ...invitations });
     } catch (err) {
       console.error("[createchat] Ошибка:", err);
-      res.status(500).json({ success: false, error: "Ошибка сервера", detail: err.message });
+      res.status(err.code === "42501" ? 403 : err.code === "22023" ? 400 : 500).json({ success: false, error: err.code === "42501" ? "Не удалось пригласить участника: проверьте права и приватность" : err.code === "22023" ? err.message : "Ошибка сервера" });
     }
   });
 }

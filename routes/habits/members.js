@@ -1,6 +1,7 @@
 import { filterBlockedHabitMemberships, getHabitAccess } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { publishHabitInvitation, sendInvitationError, readHabitInvitation } from "../../services/habitInvitations.js";
+import { inviteGroupUsers } from "../../services/groupInvitations.js";
 
 export default function (app, supabase) {
     app.get("/messages/:id/habit-invitation", authenticateUser(supabase), async (req, res) => {
@@ -137,6 +138,30 @@ export default function (app, supabase) {
                     .select("id").eq("chat_id", chatId).eq("user_id", userId).maybeSingle();
                 if (memberError) throw memberError;
                 if (!member) return res.status(403).json({ success: false, error: "Вы не участник этой беседы" });
+                const { data: paired, error: pairError } = await supabase.from("habit_members")
+                    .select("user_id").eq("habit_id", habit.id).eq("status", "accepted")
+                    .neq("user_id", habit.user_id);
+                if (pairError) throw pairError;
+                const otherIds = (paired || []).map(item => item.user_id);
+                if (otherIds.length) {
+                    const { data: inGroup, error: groupMemberError } = await supabase.from("chat_members")
+                        .select("user_id").eq("chat_id", chatId).in("user_id", otherIds).eq("is_blocked", false);
+                    if (groupMemberError) throw groupMemberError;
+                    const foundIds = new Set((inGroup || []).map(item => item.user_id));
+                    const missing = otherIds.filter(id => !foundIds.has(id));
+                    if (missing.length) {
+                        try {
+                            const result = await inviteGroupUsers(supabase, userId, chatId, missing);
+                            if (result.blocked || (result.added || 0) + (result.invited || 0) + (result.already || 0) < missing.length) {
+                                return res.status(403).json({ success: false, error: "Не удалось пригласить второго участника в беседу. Проверьте права и приватность." });
+                            }
+                        } catch (inviteError) {
+                            if (inviteError.code === "42501") return res.status(403).json({ success: false, error: "У вас нет права приглашать пользователей в эту беседу" });
+                            if (inviteError.code === "22023") return res.status(400).json({ success: false, error: "Не удалось пригласить участника в беседу" });
+                            throw inviteError;
+                        }
+                    }
+                }
             }
             const { data: updated, error } = await supabase.from("habits")
                 .update({ chat_id: chatId, ...(chatId === null ? Object.fromEntries(["complete_permission", "comment_permission", "edit_blocks_permission", "edit_info_permission", "invite_permission"].filter(key => habit[key] === "roles").map(key => [key, key === "complete_permission" || key === "comment_permission" ? "members" : "owner"])) : {}) }).eq("id", habit.id).eq("user_id", userId)
