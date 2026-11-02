@@ -56,7 +56,7 @@ export default function (app, supabase) {
         .eq("chat_id", groupId);
 
       if (!rawMembers || rawMembers.length === 0) {
-        return res.json({ success: true, roles, members: [] });
+        return res.json({ success: true, roles, members: [], is_owner: userId === ownerId, owner_id: ownerId });
       }
 
       const userIds = rawMembers.map(m => m.user_id);
@@ -79,6 +79,11 @@ export default function (app, supabase) {
         const user = userMap[rm.user_id] || {};
 
         let effectivePerms = {
+          habit_complete: false,
+          habit_comment: false,
+          habit_edit_blocks: false,
+          habit_edit_info: false,
+          habit_invite: false,
           change_avatar: false,
           change_name: false,
           change_desc: false,
@@ -127,6 +132,8 @@ export default function (app, supabase) {
         success: true,
         roles,
         members,
+        is_owner: userId === ownerId,
+        owner_id: ownerId,
       });
     } catch (err) {
       console.error("[getPermissions] error:", err);

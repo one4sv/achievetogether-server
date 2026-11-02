@@ -3,6 +3,11 @@ import { hasServerPermission } from "../../utils/hasPermission.js";
 import { PERMS } from "../../config/permissions.js";
 
 const PERMISSION_KEYS = [
+  "habit_complete",
+  "habit_comment",
+  "habit_edit_blocks",
+  "habit_edit_info",
+  "habit_invite",
   "change_avatar",
   "change_name",
   "change_desc",
