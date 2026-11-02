@@ -1,8 +1,24 @@
 # Настройка почтовых уведомлений AchieveTogether
 
-## Resend — основной провайдер
+## Бесплатный вариант без покупки домена — Gmail API
 
-Подключён [Resend Email API](https://resend.com/docs/api-reference/emails/send-email) для подтверждения регистрации, кодов 2FA и восстановления паролей. Отправка идёт по HTTPS без Google OAuth.
+**На текущем этапе владелец AT не планирует покупать собственный домен.** Поэтому Resend остаётся *опциональным будущим провайдером*, а для работающей отправки можно использовать уже существующую интеграцию Gmail API по HTTPS.
+
+Причина 7-дневного истечения `GOOGLE_REFRESH_TOKEN`: при `Google Auth Platform → Audience → Publishing status: Testing` внешний OAuth-проект выдаёт refresh token на 7 дней для Gmail scopes. Выход без оплаты домена: **перевести этот же OAuth-проект в `In production`, затем получить новый refresh token** с `access_type=offline` и `prompt=consent` и заменить только `GOOGLE_REFRESH_TOKEN` в Render. Старый токен, выпущенный в Testing, не следует считать автоматически продлённым. Статус «In production» убирает именно 7-дневный тестовый срок, но токены всё равно могут отзываться.
+
+1. Открыть https://console.cloud.google.com/auth/audience, выбрать **текущий** OAuth-проект, не создавать другой Client ID без необходимости.
+2. Переключить Publishing status: `Testing → In production`.
+3. Если Google покажет предупреждение о непроверенном приложении, учесть ограничения для OAuth-приложений с доступом к Gmail. Для личного использования одним отправляющим Google-аккаунтом Google документирует исключение из обязательной проверки; публичный доступ сторонних Google-пользователей — другой сценарий.
+4. Повторно дать разрешение **своему почтовому аккаунту**, безопасно получить новый refresh token и заменить его в **Render → Environment**. Не хранить токен в GitHub или чате. API-key и отправитель Resend для этого способа не нужны.
+5. Проверить настоящие письма подтверждения регистрации, 2FA и восстановления пароля. Если они не дошли, проверить отправку Gmail API и лог сервера; не считать настройку проверенной по статусу деплоя.
+
+**Не переходить на Gmail SMTP через Nodemailer на бесплатном Render.** Render блокирует исходящие соединения на SMTP-порты `25`, `465`, `587`; HTTPS Gmail API на 443 работает независимо от SMTP-портов. Gmail для публичных продуктовых писем ограничен квотами и антиспам-фильтрами (для личных аккаунтов до ~500 писем/день по правилам Google) и не гарантирует пригодность при росте аудитории.
+
+Источники: [Google OAuth token lifetime](https://developers.google.com/identity/protocols/oauth2#expiration), [Google OAuth без верификации для личного использования](https://support.google.com/cloud/answer/13464323), [Render Free network limitations](https://render.com/docs/free), [Gmail sending limits](https://support.google.com/mail/answer/22839).
+
+## Resend — опциональный провайдер при появлении домена
+
+В коде подготовлен [Resend Email API](https://resend.com/docs/api-reference/emails/send-email) для подтверждения регистрации, кодов 2FA и восстановления паролей. Отправка идёт по HTTPS без Google OAuth.
 
 Для **настоящей отправки** необходимы аккаунт Resend, API-ключ и собственный подтверждённый домен. Пока ключ Resend не указан, действует существующая резервная цепочка Brevo → SendGrid → Gmail. Не считать переход завершённым без получения настоящего письма.
 
