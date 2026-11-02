@@ -34,7 +34,8 @@ export default function passwordRoutes(app, supabase) {
             return res.status(400).json({ success: false, error: "Некорректный email" });
         }
         const response = { success: true, message: "Если аккаунт существует, письмо отправлено" };
-        if (!(process.env.BREVO_API_KEY && (process.env.BREVO_SENDER_EMAIL || process.env.MAIL_FROM)) &&
+        if (!(process.env.RESEND_API_KEY && (process.env.RESEND_FROM_EMAIL || process.env.MAIL_FROM)) &&
+            !(process.env.BREVO_API_KEY && (process.env.BREVO_SENDER_EMAIL || process.env.MAIL_FROM)) &&
             !(process.env.SENDGRID_API_KEY && process.env.MAIL_FROM) &&
             !(process.env.GOOGLE_REFRESH_TOKEN && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)) {
             return res.status(503).json({ success: false, error: "Почтовый сервис недоступен" });

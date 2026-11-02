@@ -1,37 +1,36 @@
-# Email delivery — AchieveTogether
+# Настройка почтовых уведомлений AchieveTogether
 
-## Preferred: Brevo Free
+## Resend — основной провайдер
 
-The server uses the free [Brevo transactional email API](https://developers.brevo.com/reference/send-transac-email), with an ongoing **300 emails/day** quota. This does not depend on Google Gmail OAuth tokens.
+Подключён [Resend Email API](https://resend.com/docs/api-reference/emails/send-email) для подтверждения регистрации, кодов 2FA и восстановления паролей. Отправка идёт по HTTPS без Google OAuth.
 
-### One-time account steps
+Для **настоящей отправки** необходимы аккаунт Resend, API-ключ и собственный подтверждённый домен. Пока ключ Resend не указан, действует существующая резервная цепочка Brevo → SendGrid → Gmail. Не считать переход завершённым без получения настоящего письма.
 
-1. Register or sign into https://app.brevo.com/ and complete account verification.
-2. Under **Settings → Senders, Domains & Dedicated IPs → Senders**, create and **verify** the sender address. If using a Gmail/Yahoo sender, Brevo may replace the From address; a privately controlled domain with SPF, DKIM and DMARC is preferable.
-3. Under **SMTP & API → API Keys**, create an API v3 key. **Never commit it**.
-4. In the Render backend service, configure:
-   - `BREVO_API_KEY` — the private API v3 key;
-   - `BREVO_SENDER_EMAIL` — the sender address verified with Brevo (alternatively existing `MAIL_FROM`);
-   - optional `MAIL_FROM_NAME` — defaults to AchieveTogether.
-5. Redeploy the backend and verify registration email, 2FA and password reset reach a real inbox. Confirm Brevo transactional logs. Do **not** claim delivery works based on a successful build.
+### Создание аккаунта и подтверждение домена
 
-### How the code works
+1. Войти или зарегистрироваться в [Resend](https://resend.com/overview).
+2. Добавить домен в [Domains](https://resend.com/domains), например `mail.example.com`. Домен должен принадлежать владельцу AT. В DNS внести **точно те записи**, которые покажет Resend (SPF, DKIM, при необходимости MX); дождаться состояния Verified.
+3. Создать API-ключ в [API Keys](https://resend.com/api-keys). Достаточно **Sending access**, предпочтительно с ограничением на домен. Скопировать один раз и сохранить как секрет.
+4. В Render → Environment серверного сервиса задать:
+   - `RESEND_API_KEY` — секретный API-ключ;
+   - `RESEND_FROM_EMAIL` — адрес на проверенном домене, например `noreply@mail.example.com`;
+   - `MAIL_FROM_NAME` — необязательное имя, по умолчанию `AchieveTogether`.
+5. После автодеплоя протестировать письма регистрации, 2FA и восстановления пароля на реальном тестовом аккаунте. Сверить доставку по журналу [Emails](https://resend.com/emails), проверить папку «Спам».
+6. Только после подтверждения отправки убрать старые секреты Gmail, Brevo и SendGrid из Render, если не используются.
 
-`services/sendmail.js`: Brevo first, otherwise existing SendGrid, otherwise existing Gmail OAuth. Errors from the selected provider are propagated, without silently falling back on failure. The Brevo request uses HTTPS, a 15-second timeout, and does not log keys or API response bodies. `routes/auth/password.js` recognizes Brevo as a configured sender. Registration and 2FA already use the shared mail function.
+Рекомендация Resend — отдельный поддомен для транзакционной почты. Общий отправитель `onboarding@resend.dev` предназначен для тестов с собственным email, но не для публичной регистрации AT.
 
-After successfully validating Brevo delivery, old Gmail/SendGrid credentials can be removed from Render. Until Brevo is configured, the existing provider still sends email (and a Gmail OAuth Testing token can still expire every seven days).
+### Реализация и проверка
 
-### Tests
+- `services/sendmail.js` выбирает Resend → Brevo → SendGrid → Gmail. При ошибке выбранного сервиса она передаётся вызывающему коду, без отправки дублей через альтернативного провайдера.
+- Resend: `POST https://api.resend.com/emails`, `Authorization: Bearer RESEND_API_KEY`, `from`, `to`, `subject`, `html`.
+- Таймаут — 15 секунд. Секретный ключ и тексты писем не логируются.
+- `routes/auth/password.js` распознаёт настройку Resend; регистрация и вход используют общий `sendMail`.
+- Тесты интеграции: `npm test` или `node --test tests/sendmail-resend.test.js`. Моки не отправляют настоящие письма.
 
-`npm test` executes `tests/*.test.js` using Node's built-in test runner. The Brevo adapter test stubs network requests: it **does not send emails**.
+## Ограничения
 
-### Why not SendGrid or Google Testing?
-
-SendGrid ended the indefinite free email tier in 2025. New accounts have a 60-day trial, after which sending requires an upgrade. Google external OAuth apps in **Testing** status issue Gmail-scope refresh tokens that expire in seven days. Moving the consent screen to **In Production** removes that particular testing expiry, though tokens can still be revoked.
-
-Official references:
-- https://help.brevo.com/hc/en-us/articles/208580669-FAQs-What-are-the-limits-of-the-Free-plan
-- https://developers.brevo.com/reference/send-transac-email
-- https://help.brevo.com/hc/en-us/articles/208836149-Create-a-new-sender-From-name-and-From-email
-- https://www.twilio.com/docs/sendgrid/ui/account-and-settings/upgrading-your-plan
-- https://developers.google.com/identity/protocols/oauth2
+- Для публичной отправки нужен **верифицированный собственный домен** (проверить DNS в Resend).
+- Free-план имеет дневные/месячные квоты: актуальные условия на https://resend.com/pricing.
+- Указанный пользователем `https://resend.com/setup.md` не удалось получить через доступные инструменты, поэтому использованы официальные [инструкции для Node.js](https://resend.com/docs/send-with-nodejs), [отправка через API](https://resend.com/docs/api-reference/emails/send-email) и [проверка домена](https://resend.com/docs/dashboard/domains/introduction).
+- Resend предоставляет MCP сервер `https://mcp.resend.com/mcp`, но для управления самим аккаунтом через ChatGPT нужно отдельно подтвердить подключение; серверу AT он не требуется.

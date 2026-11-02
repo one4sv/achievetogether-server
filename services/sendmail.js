@@ -1,6 +1,32 @@
 import sgMail from "@sendgrid/mail";
 
 export async function sendMail(to, subject, html) {
+    // Resend: send with the verified domain from a server-only API key.
+    if (process.env.RESEND_API_KEY) {
+        const from = process.env.RESEND_FROM_EMAIL || process.env.MAIL_FROM;
+        if (!from) throw new Error("Resend sender email is not configured");
+
+        const response = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                from: `${process.env.MAIL_FROM_NAME || "AchieveTogether"} <${from}>`,
+                to: [to],
+                subject,
+                html
+            }),
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!response.ok) {
+            // Do not expose API keys, recipients, or email contents in errors.
+            throw new Error(`Resend email request failed (HTTP ${response.status})`);
+        }
+        return;
+    }
+
     // Free permanent transactional email provider (300 messages/day).
     if (process.env.BREVO_API_KEY) {
         const sender = process.env.BREVO_SENDER_EMAIL || process.env.MAIL_FROM;
