@@ -1,3 +1,5 @@
+import { moscowDate } from "./habitCompletionDate.js";
+
 export async function getHabitAccess(supabase, habitId, userId) {
     const { data: habit, error } = await supabase.from("habits").select("*").eq("id", habitId).maybeSingle();
     if (error) throw error;
@@ -7,12 +9,14 @@ export async function getHabitAccess(supabase, habitId, userId) {
         p_habit: habit.id
     });
     if (permissionError) throw permissionError;
+    let chatJoinedAt = null;
     if (habit.chat_id && userId && !permissions?.is_owner) {
         const { data: member, error: memberError } = await supabase.from("chat_members")
-            .select("is_blocked").eq("chat_id", habit.chat_id).eq("user_id", userId).maybeSingle();
+            .select("is_blocked, joined_at").eq("chat_id", habit.chat_id).eq("user_id", userId).maybeSingle();
         if (memberError) throw memberError;
         if (member?.is_blocked) return {
             habit,
+            completion_start_date: null,
             is_owner: false,
             is_member: false,
             can_view: false,
@@ -22,6 +26,7 @@ export async function getHabitAccess(supabase, habitId, userId) {
             can_edit_info: false,
             can_invite: false
         };
+        chatJoinedAt = member?.joined_at || null;
     }
     let canView = !!permissions?.is_member;
     if (!canView) {
@@ -49,6 +54,12 @@ export async function getHabitAccess(supabase, habitId, userId) {
         habit,
         ...permissions,
         can_view: canView,
+        completion_start_date: habit.chat_id && !permissions?.is_owner
+            ? (chatJoinedAt ? moscowDate(chatJoinedAt) : null)
+            : null,
+        can_complete: !!permissions?.can_complete && (
+            !habit.chat_id || !!permissions?.is_owner || !!chatJoinedAt
+        ),
         progress_user_id: habit.metric_progress_mode === "shared" || !permissions?.is_member ? habit.user_id : userId,
         completion_user_id: habit.completion_mode === "shared" || !permissions?.is_member ? habit.user_id : userId,
         block_user_id: habit.schedule_blocks_mode === "shared" || !permissions?.is_member ? habit.user_id : userId

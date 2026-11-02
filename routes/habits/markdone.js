@@ -1,4 +1,5 @@
-import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { requireHabitPermission } from "../../utils/habitAccess.js";
+import { canCompleteHabitDay } from "../../utils/habitCompletionDate.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { broadcastHabitCommentUpdated } from "../../realtime/ws.js";
 
@@ -15,7 +16,16 @@ export default function (app, supabase) {
       });
 
       // Если date есть — берём её, иначе today
-      const targetDate = date && date.trim() !== "" ? date : today;
+      const targetDate = typeof date === "string" && date.trim() !== "" ? date.trim() : today;
+      if (typeof targetDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+        return res.status(400).json({ success: false, error: "Неверная дата" });
+      }
+      if (!canCompleteHabitDay(req.habitAccess, targetDate)) {
+        return res.status(403).json({
+          success: false,
+          error: "Нельзя отмечать выполнение раньше даты вступления в беседу"
+        });
+      }
 
       const { data: existing, error: selectError } = await supabase
         .from("habit_completions")

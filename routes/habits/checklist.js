@@ -2,6 +2,7 @@ import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.
 import { authenticateUser } from "../../middleware/token.js";
 import { withRetry } from "../../utils/withRetry.js";
 import { checklistInput, isPositiveId } from "../../utils/validation.js";
+import { canCompleteHabitDay } from "../../utils/habitCompletionDate.js";
 
 export default function (app, supabase) {
     app.post("/checklist/save", authenticateUser(supabase), requireHabitPermission(supabase, "complete"), async (req, res) => {
@@ -13,6 +14,9 @@ export default function (app, supabase) {
 
         if (!isPositiveId(habit_id) || !input) {
             return res.status(400).json({ success: false, error: "Недостаточно данных" });
+        }
+        if (!canCompleteHabitDay(req.habitAccess, input.date)) {
+            return res.status(403).json({ success: false, error: "Задача относится к дню до вступления в беседу" });
         }
 
         try {
@@ -62,10 +66,13 @@ export default function (app, supabase) {
         if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ success: false, error: "Неверный ID задачи" });
         try {
             const { data: task, error: fetchError } = await supabase.from("checklist_completions")
-                .select("id, habit_id, user_id, completed_by, completed_at")
+                .select("id, habit_id, user_id, date, completed_by, completed_at")
                 .eq("id", id).eq("user_id", req.habitAccess.progress_user_id).maybeSingle();
             if (fetchError) throw fetchError;
             if (!task) return res.status(404).json({ success: false, error: "Задача не найдена" });
+            if (!canCompleteHabitDay(req.habitAccess, task.date)) {
+                return res.status(403).json({ success: false, error: "Нельзя выполнить задачу за день до вступления в беседу" });
+            }
             const complete = !task.completed_at;
             const { data, error } = await supabase.from("checklist_completions")
                 .update({
@@ -144,6 +151,9 @@ export default function (app, supabase) {
 
         if (!isPositiveId(id) || !input) {
             return res.status(400).json({ success: false, error: "Недостаточно данных" });
+        }
+        if (!canCompleteHabitDay(req.habitAccess, input.date)) {
+            return res.status(403).json({ success: false, error: "Задача относится к дню до вступления в беседу" });
         }
 
         try {
