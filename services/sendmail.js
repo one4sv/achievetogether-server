@@ -1,6 +1,30 @@
 import sgMail from "@sendgrid/mail";
 
 export async function sendMail(to, subject, html) {
+    // Free permanent transactional email provider (300 messages/day).
+    if (process.env.BREVO_API_KEY) {
+        const sender = process.env.BREVO_SENDER_EMAIL || process.env.MAIL_FROM;
+        if (!sender) throw new Error("Brevo sender is not configured");
+
+        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+            method: "POST",
+            headers: {
+                "accept": "application/json",
+                "content-type": "application/json",
+                "api-key": process.env.BREVO_API_KEY
+            },
+            body: JSON.stringify({
+                sender: { name: process.env.MAIL_FROM_NAME || "AchieveTogether", email: sender },
+                to: [{ email: to }],
+                subject,
+                htmlContent: html
+            }),
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!response.ok) throw new Error(`Brevo email delivery failed (HTTP ${response.status})`);
+        return;
+    }
+
     if (process.env.SENDGRID_API_KEY && process.env.MAIL_FROM) {
         sgMail.setApiKey(process.env.SENDGRID_API_KEY);
         await sgMail.send({
