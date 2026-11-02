@@ -192,6 +192,7 @@ export default function(app, supabase) {
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const progressUserId = await metricUser(habitId, userId);
+            const completionUserId = (await getHabitAccess(supabase, habitId, userId)).completion_user_id;
             const { data: habit, error: habitError } = await supabase
                 .from("habits")
                 .select("id")
@@ -242,7 +243,7 @@ export default function(app, supabase) {
                 .from("habit_completions")
                 .select("id")
                 .eq("habit_id", habitId)
-                .eq("user_id", progressUserId)
+                .eq("user_id", completionUserId)
                 .eq("completed_at", todayMoscow);
 
                 let completionId = null;
@@ -252,7 +253,7 @@ export default function(app, supabase) {
                         .from("habit_completions")
                         .insert({
                             habit_id: habitId,
-                            user_id: progressUserId,
+                            user_id: completionUserId,
                             completed_at: todayMoscow,
                             is_user_marked: false
                         })

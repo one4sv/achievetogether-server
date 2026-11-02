@@ -13,7 +13,7 @@ export default function (app, supabase) {
       if (membersError) throw membersError;
       const memberIds = (memberships || []).map(item => item.habit_id);
       const { data: allHabits, error: habitsError } = await supabase
-        .from("habits").select("id, name, ongoing, user_id, chat_id, metric_progress_mode")
+        .from("habits").select("id, name, ongoing, user_id, chat_id, completion_mode")
         .or(`user_id.eq.${user_id}${memberIds.length ? `,id.in.(${memberIds.join(",")})` : ""}`);
       if (habitsError) throw habitsError;
       const habits = await filterBlockedHabitMemberships(supabase, allHabits, user_id);
@@ -22,7 +22,7 @@ export default function (app, supabase) {
       const habitsById = new Map(habits.map(habit => [habit.id, habit]));
       const progressIds = [...new Set([
         user_id,
-        ...habits.filter(habit => habit.metric_progress_mode === "shared").map(habit => habit.user_id)
+        ...habits.filter(habit => habit.completion_mode === "shared").map(habit => habit.user_id)
       ])];
 
       const { data: allCompletions, error: errorComp } = await supabase
@@ -31,7 +31,7 @@ export default function (app, supabase) {
       if (errorComp) throw errorComp;
       const completions = (allCompletions || []).filter(item => {
         const habit = habitsById.get(item.habit_id);
-        return habit && item.user_id === (habit.metric_progress_mode === "shared" ? habit.user_id : user_id);
+        return habit && item.user_id === (habit.completion_mode === "shared" ? habit.user_id : user_id);
       });
 
       const { data: comments, error: errorComments } = await supabase
@@ -147,7 +147,7 @@ export default function (app, supabase) {
         .from("habit_completions")
         .select("completed_at, created_at")
         .eq("habit_id", habitId)
-        .eq("user_id", req.habitAccess.progress_user_id);
+        .eq("user_id", req.habitAccess.completion_user_id);
 
       if (errorComp) {
         console.log(errorComp);

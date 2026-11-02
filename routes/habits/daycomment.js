@@ -22,7 +22,7 @@ export default function (app, supabase) {
                 .eq("is_user_marked", true)
                 .order("created_at", { ascending: false });
             if (completionsError) throw completionsError;
-            const shared = req.habitAccess.habit.metric_progress_mode === "shared";
+            const shared = req.habitAccess.habit.completion_mode === "shared";
             const completed = (completions || []).map(item => ({
                 id: item.id,
                 user_id: item.actor_user_id || (shared ? null : item.user_id),

@@ -343,7 +343,7 @@ export default function (app, supabase) {
                 .from("habit_completions")
                 .select("id, is_user_marked")
                 .eq("habit_id", habitIdNum)
-                .eq("user_id", access.progress_user_id)
+                .eq("user_id", access.completion_user_id)
                 .eq("completed_at", date)
                 .maybeSingle();
 
@@ -355,7 +355,7 @@ export default function (app, supabase) {
                     await supabase.from("habit_completions").insert({
                         habit_id: habitIdNum,
                         completed_at: date,
-                        user_id: access.progress_user_id,
+                        user_id: access.completion_user_id,
                         is_user_marked: false  // авто-создание
                     });
                 }

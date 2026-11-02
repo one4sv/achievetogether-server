@@ -56,7 +56,7 @@ export default function (app, supabase) {
                 return res.status(500).json({ success: false, error: "Ошибка получения выполнений" });
             }
 
-            const sharedHabits = habitsArr.filter(h => h.metric_progress_mode === "shared" && h.user_id !== userId);
+            const sharedHabits = habitsArr.filter(h => h.completion_mode === "shared" && h.user_id !== userId);
             let sharedCompletions = [];
             if (sharedHabits.length) {
                 const { data, error } = await supabase.from("habit_completions")
@@ -76,7 +76,7 @@ export default function (app, supabase) {
                 return {
                     ...habit,
                     settings,
-                    done: doneSet.has(`${habit.id}:${habit.metric_progress_mode === "shared" ? habit.user_id : userId}`),
+                    done: doneSet.has(`${habit.id}:${habit.completion_mode === "shared" ? habit.user_id : userId}`),
                     isOwner: habit.user_id === userId,
                 };
             });
@@ -152,7 +152,7 @@ export default function (app, supabase) {
             const startOfDay = new Date(`${today}T00:00:00+03:00`).toISOString();
             const endOfDay = new Date(new Date(startOfDay).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-            const progressUserId = access.progress_user_id;
+            const progressUserId = access.completion_user_id;
             let isDone = false;
             let comment = "";
 

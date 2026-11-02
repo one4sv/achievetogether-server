@@ -70,7 +70,7 @@ export default function (app, supabase) {
                             .from("habit_completions")
                             .select("completed_at")
                             .eq("habit_id", habitId)
-                            .eq("user_id", req.habitAccess.progress_user_id)
+                            .eq("user_id", req.habitAccess.completion_user_id)
                             .order("completed_at", {
                                 ascending: true
                             })

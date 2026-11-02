@@ -83,7 +83,7 @@ export default function (app, supabase) {
   // Helper для обновления completion
   const checkAndUpdateCompletion = async (habit_id, user_id, old_state, new_state) => {
     const today = getTodayDate();
-    const completionUserId = await metricUser(habit_id, user_id);
+    const completionUserId = (await getHabitAccess(supabase, habit_id, user_id)).completion_user_id;
 
     if (!old_state && new_state) {
       // Добавляем completion

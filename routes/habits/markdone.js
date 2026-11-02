@@ -9,7 +9,7 @@ export default function (app, supabase) {
 
     try {
       if (!habit_id) return res.status(400).json({ success: false });
-      const progressUserId = req.habitAccess.progress_user_id;
+      const progressUserId = req.habitAccess.completion_user_id;
       const today = new Date().toLocaleDateString("en-CA", {
         timeZone: "Europe/Moscow"
       });

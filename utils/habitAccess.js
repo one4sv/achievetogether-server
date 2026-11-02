@@ -50,6 +50,7 @@ export async function getHabitAccess(supabase, habitId, userId) {
         ...permissions,
         can_view: canView,
         progress_user_id: habit.metric_progress_mode === "shared" || !permissions?.is_member ? habit.user_id : userId,
+        completion_user_id: habit.completion_mode === "shared" || !permissions?.is_member ? habit.user_id : userId,
         block_user_id: habit.schedule_blocks_mode === "shared" || !permissions?.is_member ? habit.user_id : userId
     };
 }
