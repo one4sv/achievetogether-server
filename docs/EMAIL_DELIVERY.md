@@ -1,5 +1,22 @@
 # Настройка почтовых уведомлений AchieveTogether
 
+## Получение refresh token в Google OAuth Playground — инструкция для AT
+
+**Уже подтверждено владельцем:** Google Cloud OAuth-проект `inbound-entity-294517`, Publishing status **In production** (скриншот от 02.11.2026). Не нажимать `Back to testing`.
+
+1. Открыть [Google Cloud → Clients](https://console.cloud.google.com/auth/clients?project=inbound-entity-294517). Найти **существующий Web application OAuth client**, чей Client ID совпадает со значением `GOOGLE_CLIENT_ID` в Render. Нельзя брать идентификатор другого проекта/клиента.
+2. Для этого клиента в **Authorized redirect URIs** добавить **строго** `https://developers.google.com/oauthplayground`, сохранить.
+3. Открыть [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/), в правом верхнем углу ⚙ настроить: **OAuth flow = Server-side**, **Access type = Offline**, **Force prompt = Consent Screen**, **Use your own OAuth credentials** = включено. Вставить Client ID и Client Secret из того же Google OAuth-клиента прямо в официальный Playground; не отправлять их в чат и не коммитить.
+4. В **Step 1 → Input your own scopes** указать `https://www.googleapis.com/auth/gmail.send`; нажать **Authorize APIs**. Выбрать **тот Gmail**, с которого сервер должен отправлять письма. Подтвердить только разрешение на отправку; если есть предупреждение о непроверенном приложении, проверить, что это действительно собственный проект.
+5. В **Step 2** нажать **Exchange authorization code for tokens**. Скопировать поле **Refresh token** (НЕ Access token). Не использовать опцию `Create Link → Include OAuth credentials and OAuth tokens in the link`.
+6. В [Render → achievetogether-server](https://dashboard.render.com/web/srv-d3mh8dje5dus73es6560) открыть **Environment** и заменить **только** `GOOGLE_REFRESH_TOKEN`. Проверить, что `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` относятся к тому же клиенту. Значение `GOOGLE_REDIRECT_URI` используется для первичной авторизации, но не меняет принадлежность refresh token к Client ID.
+7. **Важный приоритет:** `services/sendmail.js` выбирает Resend → Brevo → SendGrid → Gmail. Для Gmail не должно быть активных `RESEND_API_KEY`, `BREVO_API_KEY`, `SENDGRID_API_KEY`, иначе будет выбран другой сервис. Не удалять действующие секреты наугад — сначала проверить.
+8. Сохранить изменения в Render и дождаться `live`. Запросить письмо через отдельный тестовый сценарий регистрации / восстановления пароля / 2FA, убедиться, что письмо получено и сервер не выдаёт `invalid_grant`.
+
+Внимание: Google OAuth Playground **собственными Playground credentials** отзывает refresh token через 24 часа. Вариант выше с **Use your own OAuth credentials** это ограничение устраняет. Ранее выпущенный в Testing refresh token необходимо заменить новым. Production убирает лишь семидневный предел Testing, но Google может отзывать токен при смене пароля Gmail, неактивности и отзыве разрешения.
+
+Официальные источники: [OAuth Playground](https://developers.google.com/oauthplayground/), [OAuth 2.0 refresh token expiration](https://developers.google.com/identity/protocols/oauth2#expiration), [Web server OAuth](https://developers.google.com/identity/protocols/oauth2/web-server).
+
 ## Бесплатный вариант без покупки домена — Gmail API
 
 **На текущем этапе владелец AT не планирует покупать собственный домен.** Поэтому Resend остаётся *опциональным будущим провайдером*, а для работающей отправки можно использовать уже существующую интеграцию Gmail API по HTTPS.
