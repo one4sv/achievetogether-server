@@ -40,10 +40,17 @@ export default function (app, supabase) {
         .select("id, name, permissions, is_editable, desc, is_default, rank")
         .eq("chat_id", groupId);
 
+      const allPermissionKeys = [
+        "habit_complete", "habit_comment", "habit_edit_blocks", "habit_edit_info", "habit_invite",
+        "change_avatar", "change_name", "change_desc", "manage_roles", "can_invite_users",
+        "kick_users", "ban_users", "delete_others", "pin_messages", "redirect_messages"
+      ];
       const roles = (rawRoles || []).map(r => ({
         role_id: r.id.toString(),
         role_name: r.name,
-        permissions: r.permissions || {},
+        permissions: r.name?.trim().toLowerCase() === "owner"
+          ? Object.fromEntries(allPermissionKeys.map(key => [key, true]))
+          : r.permissions || {},
         is_editable:r.is_editable,
         desc:r.desc || "",
         is_default:r.is_default,

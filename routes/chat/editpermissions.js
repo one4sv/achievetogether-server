@@ -67,12 +67,12 @@ export default function (app, supabase) {
       // Получаем все роли группы для проверок rank и is_editable
       const { data: rawRoles } = await supabase
         .from("chat_roles")
-        .select("id, rank, is_editable")
+        .select("id, name, rank, is_editable")
         .eq("chat_id", groupId);
 
       const roleMap = {};
       rawRoles?.forEach(r => {
-        roleMap[r.id] = { rank: r.rank, is_editable: r.is_editable };
+        roleMap[String(r.id)] = { rank: r.rank, is_editable: r.is_editable, is_owner_role: r.name?.trim().toLowerCase() === "owner" };
       });
 
       // Текущий ранг пользователя (для проверки «выше ли ранг»)
@@ -97,6 +97,11 @@ export default function (app, supabase) {
             if (label === "default_role_id") {
               if (typeof value !== "string" && value !== null) throw new Error("Неверный тип default_role_id");
 
+              if (value) {
+                const nextRole = roleMap[String(value)];
+                if (!nextRole || nextRole.is_owner_role) throw new Error("Роль владельца не может быть ролью по умолчанию");
+              }
+
               // Сбрасываем is_default у всех ролей
               await supabase
                 .from("chat_roles")
@@ -117,6 +122,7 @@ export default function (app, supabase) {
             const roleInfo = roleMap[roleId];
 
             if (!roleInfo) throw new Error("Роль не найдена");
+            if (roleInfo.is_owner_role) throw new Error("Системную роль owner нельзя изменять");
 
             // Проверка прав на редактирование роли
             if (!isOwner) {
@@ -125,8 +131,9 @@ export default function (app, supabase) {
             }
 
             if (label === "role_name") {
-              if (typeof value !== "string") throw new Error("Неверный тип имени роли");
-              await supabase.from("chat_roles").update({ name: value }).eq("id", roleId);
+              if (typeof value !== "string" || !value.trim()) throw new Error("Неверное имя роли");
+              if (value.trim().toLowerCase() === "owner") throw new Error("Имя owner зарезервировано");
+              await supabase.from("chat_roles").update({ name: value.trim() }).eq("id", roleId);
             } else if (label === "rank") {
               if (typeof value !== "number" || value < 1 || value > 99) throw new Error("Неверный ранг");
               await supabase.from("chat_roles").update({ rank: value }).eq("id", roleId);
@@ -153,7 +160,7 @@ export default function (app, supabase) {
             if (!targetMember) throw new Error("Участник не найден");
 
             // Нельзя редактировать владельца (кроме как владельцем) и себя
-            if (targetMember.user_id === chat.creator_id && !isOwner) throw new Error("Нельзя редактировать владельца");
+            if (targetMember.user_id === chat.creator_id) throw new Error("Нельзя редактировать права владельца");
             if (targetMember.user_id === userId) throw new Error("Нельзя редактировать себя");
 
             // Проверка ранга
@@ -164,6 +171,10 @@ export default function (app, supabase) {
 
             if (label === "role_id") {
               if (typeof value !== "string" && value !== null) throw new Error("Неверный тип role_id");
+              if (value && (!roleMap[String(value)] || roleMap[String(value)].is_owner_role)) {
+                throw new Error("Нельзя назначить системную роль owner");
+              }
+              if (targetMember.user_id === chat.creator_id) throw new Error("Роль владельца нельзя переназначить");
               await supabase
                 .from("chat_members")
                 .update({ role_id: value || null })
