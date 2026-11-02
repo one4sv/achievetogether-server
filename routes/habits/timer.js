@@ -1,4 +1,5 @@
 import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { canCompleteHabitDay, moscowDate } from "../../utils/habitCompletionDate.js";
 import { authenticateUser } from "../../middleware/token.js"
 import { broadcastTimerUpdate } from "../../realtime/ws.js"
 
@@ -97,6 +98,9 @@ export default function(app, supabase) {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
             const progressUserId = await metricUser(habitId, userId);
             const startedAt = new Date(time);
+            if (!canCompleteHabitDay(req.habitAccess, moscowDate(startedAt))) {
+                return res.status(403).json({ success: false, error: "Дата таймера раньше вступления в беседу" });
+            }
             const { data: habit } = await supabase.from("habits").select("id, end_time").eq("id", habitId).single();
 
             if (!habit) return res.status(404).json({ success: false, error: "Привычка не найдена" });
@@ -187,7 +191,10 @@ export default function(app, supabase) {
         }
 
         const stopTime = new Date(time);
-        const todayMoscow = stopTime.toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
+        const todayMoscow = moscowDate(stopTime);
+        if (!canCompleteHabitDay(req.habitAccess, todayMoscow)) {
+            return res.status(403).json({ success: false, error: "Нельзя выполнить день до вступления в беседу" });
+        }
 
         try {
             if (!(await canUseTimer(habitId, userId))) return res.status(403).json({ success: false, error: "Нет доступа к таймеру" });
