@@ -1,5 +1,8 @@
 import registerRoutes from "./auth/register.js";
 import authRoutes from "./auth/auth.js";
+import passwordRoutes from "./auth/password.js";
+import sessionRoutes from "./auth/sessions.js";
+import wsTicketRoutes from "./auth/ws-ticket.js";
 import deviceRoutes from "./auth/devices.js";
 import postRoute from "./posts/post.js";
 import confirmRoutes from "./auth/confirm.js";
@@ -53,6 +56,9 @@ import ChatMediaRoutes from "./chat/ChatMedia.js";
 export default function registerAllRoutes(app, supabase) {
     registerRoutes(app, supabase);
     authRoutes(app, supabase);
+    passwordRoutes(app, supabase);
+    sessionRoutes(app, supabase);
+    wsTicketRoutes(app, supabase);
     deviceRoutes(app, supabase);
     postRoute(app, supabase);
     confirmRoutes(app, supabase);
@@ -100,6 +106,6 @@ export default function registerAllRoutes(app, supabase) {
     markplanRoutes(app, supabase)
     habit_statsRoutes(app, supabase)
     ChatMediaRoutes(app, supabase);
-    logoutRoutes(app);
+    logoutRoutes(app, supabase);
     LinkPreviewRoutes(app)
 }

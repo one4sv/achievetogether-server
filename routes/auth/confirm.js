@@ -1,4 +1,4 @@
-import jwt from "jsonwebtoken";
+import { issueSession } from "../../utils/authSession.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -90,16 +90,7 @@ export default function (app, supabase) {
         await supabase.from("pending_users").delete().eq("id", pendingUser.id);
 
         // JWT + cookie
-        const jwtToken = jwt.sign({ id: newUser.id }, SECRET, {
-          expiresIn: "30d",
-        });
-
-        res.cookie("token", jwtToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none",
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
+        await issueSession(supabase, req, res, newUser.id);
 
         return res.status(200).json({
           success: true,
@@ -141,16 +132,7 @@ export default function (app, supabase) {
         }
 
         // JWT + cookie
-        const jwtToken = jwt.sign({ id: user.id }, SECRET, {
-          expiresIn: "30d",
-        });
-
-        res.cookie("token", jwtToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none",
-          maxAge: 30 * 24 * 60 * 60 * 1000,
-        });
+        await issueSession(supabase, req, res, user.id);
 
         // Удаляем использованный код
         await supabase.from("auth_tokens").delete().eq("id", authRow.id);

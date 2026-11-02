@@ -1,7 +1,20 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { createHash } from "node:crypto";
 let clientsMap = new Map();
 let supabaseGlobal;
 let broadcastUserStatus;
+
+export function disconnectAuthSession(sessionId) {
+  for (const sockets of clientsMap.values()) sockets.forEach(ws => {
+    if (ws.authSessionId === sessionId && ws.readyState === WebSocket.OPEN) ws.close(1008, "Session revoked");
+  });
+}
+
+export function disconnectUserSockets(userId) {
+  clientsMap.get(userId)?.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) ws.close(1008, "Session revoked");
+  });
+}
 
 export async function broadcastNewMessage(chat_id, message) {
   try {
@@ -248,11 +261,41 @@ export default function initWebSocket(supabase, server) {
   clientsMap = new Map();
   wss.on("connection", async (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    const userId = url.searchParams.get("userId");
-    if (!userId) {
-      ws.close(1008, "No userId provided");
+    const ticket = url.searchParams.get("ticket");
+    const allowed = (process.env.CLIENT_URL || "https://achievetogether.vercel.app").split(",").map(x => x.trim());
+    if (process.env.NODE_ENV !== "production") allowed.push("http://localhost:5173", "http://127.0.0.1:5173");
+    if (!allowed.includes(req.headers.origin) || !ticket || !/^[A-Za-z0-9_-]{43}$/.test(ticket)) {
+      ws.close(1008, "Authentication required");
       return;
     }
+
+    const ticketHash = createHash("sha256").update(ticket).digest("hex");
+    const { data: tickets, error: ticketError } = await supabase.from("at_ws_tickets")
+      .delete().eq("token_hash", ticketHash).gt("expires_at", new Date().toISOString())
+      .select("user_id,session_id,auth_version");
+    if (ticketError || tickets?.length !== 1) {
+      ws.close(1008, "Invalid ticket");
+      return;
+    }
+    const authenticated = tickets[0];
+    const userId = authenticated.user_id;
+    const { data: account } = await supabase.from("users")
+      .select("auth_version").eq("id", userId).maybeSingle();
+    if (!account || account.auth_version !== authenticated.auth_version) {
+      ws.close(1008, "Expired session");
+      return;
+    }
+    if (authenticated.session_id) {
+      const { data: active } = await supabase.from("at_user_sessions")
+        .select("id").eq("id", authenticated.session_id).eq("user_id", userId)
+        .is("revoked_at", null).gt("expires_at", new Date().toISOString()).maybeSingle();
+      if (!active) {
+        ws.close(1008, "Session revoked");
+        return;
+      }
+    }
+    ws.authSessionId = authenticated.session_id;
+    ws.authVersion = authenticated.auth_version;
     console.log(`🟢 WS connected: user ${userId}`);
     if (!clientsMap.has(userId)) clientsMap.set(userId, new Set());
     clientsMap.get(userId).add(ws);
@@ -281,10 +324,22 @@ export default function initWebSocket(supabase, server) {
     }
     const aliveTimer = setInterval(async () => {
       try {
-        await supabase
-          .from("users")
-          .update({ last_online: new Date().toISOString() })
-          .eq("id", userId);
+        const { data: account } = await supabase.from("users")
+          .select("auth_version").eq("id", userId).maybeSingle();
+        if (!account || account.auth_version !== ws.authVersion) {
+          ws.close(1008, "Session expired");
+          return;
+        }
+        if (ws.authSessionId) {
+          const { data: active } = await supabase.from("at_user_sessions")
+            .select("id").eq("id", ws.authSessionId).eq("user_id", userId)
+            .is("revoked_at", null).gt("expires_at", new Date().toISOString()).maybeSingle();
+          if (!active) {
+            ws.close(1008, "Session revoked");
+            return;
+          }
+        }
+        await supabase.from("users").update({ last_online: new Date().toISOString() }).eq("id", userId);
       } catch (err) {
         console.error("Error updating last_online:", err);
       }

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import jwt from "jsonwebtoken";
+import { issueSession } from "../../utils/authSession.js";
 import { authenticateUser } from "../../middleware/token.js";
 const hash = value => createHash("sha256").update(value).digest("hex");
 const secret = () => randomBytes(32).toString("base64url");
@@ -12,18 +12,6 @@ const cookieOptions = () => ({
     sameSite: process.env.NODE_ENV === "test" ? "lax" : "none",
     path: "/"
 });
-const session = (res, id) => res.cookie(
-    "token",
-    jwt.sign({
-        id
-    }, process.env.JWT_SECRET, {
-        expiresIn: "30d"
-    }),
-    {
-        ...cookieOptions(),
-        maxAge: duration
-    }
-);
 export default function deviceRoutes(app, supabase) {
     const attempts = new Map();
     const guard = (req, res, next) => {
@@ -242,7 +230,7 @@ export default function deviceRoutes(app, supabase) {
                 if (!rows?.length) return res.status(410).json({
                     success: false
                 });
-                session(res, rows[0].user_id);
+                await issueSession(supabase, req, res, rows[0].user_id);
                 res.clearCookie(`at_qr_${req.body.id}`, cookieOptions());
                 res.json({
                     success: true
@@ -268,6 +256,10 @@ export default function deviceRoutes(app, supabase) {
                         {
                             user_id: req.user.id,
                             token_hash: hash(token),
+                            session_id: req.sessionId || null,
+                            user_agent: (req.get("user-agent") || "").slice(0, 500),
+                            ip_address: req.ip || null,
+                            last_used_at: now(),
                             expires_at: new Date(Date.now() + duration).toISOString()
                         }
                     )
@@ -323,7 +315,8 @@ export default function deviceRoutes(app, supabase) {
                 const rows = await checked(
                     supabase.from("at_trusted_devices").update(
                         {
-                            token_hash: hash(token)
+                            token_hash: hash(token),
+                            last_used_at: now()
                         }
                     ).eq(
                         "token_hash",
@@ -338,7 +331,9 @@ export default function deviceRoutes(app, supabase) {
                 if (!rows?.length) return res.status(401).json({
                     success: false
                 });
-                session(res, rows[0].user_id);
+                const currentSessionId = await issueSession(supabase, req, res, rows[0].user_id);
+                await checked(supabase.from("at_trusted_devices").update({ session_id: currentSessionId })
+                    .eq("token_hash", hash(token)));
                 res.cookie(
                     "at_device",
                     token,

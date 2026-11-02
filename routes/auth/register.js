@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { randomUUID } from "crypto";
+import { randomInt } from "node:crypto";
 import { sendMail } from "../../services/sendmail.js"; // твой модуль с API
 import dotenv from "dotenv";
 import { getMailTemplate } from "../../utils/mailTamlate.js";
@@ -37,15 +37,18 @@ export default function(app, supabase) {
     });
 
     app.post("/register", async (req, res) => {
-        const { nick, mail, pass } = req.body;
-        console.log("Register data:", { nick, mail, pass });
+        const { nick, mail, pass } = req.body || {};
 
-        if (!nick || !mail || !pass) {
-            return res.status(400).json({ success: false, error: "Все поля обязательны" });
+
+        if (typeof nick !== "string" || !/^[A-Za-z0-9_]{4,16}$/.test(nick) ||
+            typeof mail !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail.trim()) ||
+            typeof pass !== "string" || pass.length < 8 || pass.length > 30 ||
+            !/^[A-Za-z0-9]+$/.test(pass) || !/[A-Za-z]/.test(pass) || !/\d/.test(pass)) {
+            return res.status(400).json({ success: false, error: "Некорректные данные регистрации" });
         }
 
         try {
-            const dupeInUsers = await checkDuplicates("users", nick, mail);
+            const dupeInUsers = await checkDuplicates("users", nick, mail.trim().toLowerCase());
             if (dupeInUsers) {
                 return res.status(409).json({
                     success: false,
@@ -55,7 +58,7 @@ export default function(app, supabase) {
                 });
             }
 
-            const dupeInPending = await checkDuplicates("pending_users", nick, mail);
+            const dupeInPending = await checkDuplicates("pending_users", nick, mail.trim().toLowerCase());
             if (dupeInPending) {
                 return res.status(409).json({
                     success: false,
@@ -66,15 +69,13 @@ export default function(app, supabase) {
             }
 
             const hashedPassword = await bcrypt.hash(pass, 10);
-            const code = Math.floor(
-                100000 + Math.random() * 900000
-            ).toString();
+            const code = String(randomInt(100000, 1000000));
             const created_at = new Date().toISOString();
             const expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
             const { error: insertError } = await supabase
                 .from("pending_users")
-                .insert([{ nick, mail, pass: hashedPassword, code, created_at, expires_at }]);
+                .insert([{ nick, mail: mail.trim().toLowerCase(), pass: hashedPassword, code, created_at, expires_at }]);
 
             if (insertError) {
                 console.error("Ошибка добавления в PendingUsers:", insertError);
@@ -87,11 +88,12 @@ export default function(app, supabase) {
                 expireText: "Код действителен 24 часа"
             });
 
-            await sendMail(
-                mail,
-                "Подтверждение регистрации",
-                mailHtml
-            );
+            try {
+                await sendMail(mail, "Подтверждение регистрации", mailHtml);
+            } catch (deliveryError) {
+                await supabase.from("pending_users").delete().eq("mail", mail).eq("nick", nick).eq("code", code);
+                throw deliveryError;
+            }
 
             res.status(200).json({ success: true, message: "Письмо с подтверждением отправлено" });
 

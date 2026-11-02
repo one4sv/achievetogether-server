@@ -2,7 +2,8 @@ import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
 import { sendMail } from "../../services/sendmail.js";
 import dotenv from "dotenv";
-import jwt from "jsonwebtoken";
+import { randomInt } from "node:crypto";
+import { issueSession } from "../../utils/authSession.js";
 import { getMailTemplate } from "../../utils/mailTamlate.js";
 dotenv.config();
 
@@ -16,17 +17,21 @@ export default function(app, supabase) {
     }
 
     try {
-      const { data: users, error: fetchError } = await supabase
-        .from("users")
-        .select("id, mail, nick, pass")
-        .or(`mail.eq.${login},nick.eq.${login}`)
-        .limit(1);
-
-      if (fetchError || !users || users.length === 0) {
-        return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
+      const identity = typeof login === "string" ? login.trim() : "";
+      if (identity.length > 254 || !identity || typeof pass !== "string" || pass.length > 256) {
+        return res.status(400).json({ success: false, error: "Неверные данные входа" });
       }
-
-      const user = users[0];
+      const { data: byEmail, error: emailError } = await supabase.from("users")
+        .select("id, mail, nick, pass").eq("mail", identity.toLowerCase()).maybeSingle();
+      if (emailError) throw emailError;
+      let user = byEmail;
+      if (!user) {
+        const { data: byNick, error: nickError } = await supabase.from("users")
+          .select("id, mail, nick, pass").eq("nick", identity).maybeSingle();
+        if (nickError) throw nickError;
+        user = byNick;
+      }
+      if (!user) return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
 
       // 2️⃣ Проверяем пароль
       const valid = await bcrypt.compare(pass, user.pass);
@@ -46,9 +51,7 @@ export default function(app, supabase) {
 
       // 4️⃣ Если 2FA включена — создаём токен и отправляем письмо
       if (settings.two_auth) {
-        const code = Math.floor(
-          100000 + Math.random() * 900000
-        ).toString();
+        const code = String(randomInt(100000, 1000000));
         const createdAt = new Date().toISOString(); // Добавлено: created_at в UTC для timestamptz
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 10 минут
 
@@ -77,25 +80,12 @@ export default function(app, supabase) {
           success: true,
           message: "Письмо с подтверждением отправлено (2FA включена)",
           two_auth: settings.two_auth, // Добавлено для frontend
+          email: user.mail,
         });
       }
 
       // 5️⃣ Если 2FA выключена — создаём JWT и авторизуем сразу
-      const jwtToken = jwt.sign({ id: user.id }, SECRET, { expiresIn: "30d" });
-      if (isRemember) {
-        res.cookie("token", jwtToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none",
-          maxAge: 30 * 24 * 60 * 60 * 1000
-        });
-      } else {
-        res.cookie("token", jwtToken, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none"
-        });
-      }
+      await issueSession(supabase, req, res, user.id, !!isRemember);
 
       return res.status(200).json({
         success: true,
