@@ -1,8 +1,11 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { broadcastMessageDeleted, broadcastGroupUpdated, broadcastKicked } from "../../realtime/ws.js";
+import { canAccessMessage } from "../../utils/messageAccess.js";
+import { hasServerPermission } from "../../utils/hasPermission.js";
 
 export default function (app, supabase) {
     app.post("/delete", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
         const { goal, delete_id, group_id } = req.body;
         const { id: user_id } = req.user;
 
@@ -41,7 +44,11 @@ export default function (app, supabase) {
                     return res.status(404).json({ success: false, message: "Собеседник не найден" });
                 }
 
-                const commonChatId = chatsUser1.find(c => chatsUser2.some(c2 => c2.chat_id === c.chat_id))?.chat_id;
+                const commonIds = chatsUser1.filter(c => chatsUser2.some(c2 => c2.chat_id === c.chat_id)).map(c => c.chat_id);
+                const { data: personalChat, error: personalError } = await supabase.from("chats")
+                    .select("id").in("id", commonIds).eq("is_group", false).limit(1).maybeSingle();
+                if (personalError) throw personalError;
+                const commonChatId = personalChat?.id;
 
                 if (!commonChatId) {
                     return res.status(403).json({ success: false, message: "Общий чат не найден" });
@@ -85,7 +92,7 @@ export default function (app, supabase) {
                     // Получаем сообщение
                     const { data: message, error: msgError } = await supabase
                         .from("messages")
-                        .select("id, chat_id, hidden")
+                        .select("id, chat_id, hidden, sender_id")
                         .eq("id", msgId)
                         .single();
 
@@ -95,18 +102,15 @@ export default function (app, supabase) {
                     }
 
                     // Проверяем, что пользователь — член чата сообщения
-                    const { data: member, error: memError } = await supabase
-                        .from("chat_members")
-                        .select("user_id")
-                        .eq("chat_id", message.chat_id)
-                        .eq("user_id", user_id)
-                        .single();
-
-                    if (memError || !member) {
+                    if (!(await canAccessMessage(supabase, message, user_id))) {
                         return res.status(403).json({ success: false, message: `Нет доступа к сообщению ${msgId}` });
                     }
 
                     if (goal === "messForAll") {
+                        if (message.sender_id !== user_id &&
+                            !(await hasServerPermission(supabase, message.chat_id, user_id, "delete_others"))) {
+                            return res.status(403).json({ success: false, message: "Нет права удалять чужие сообщения" });
+                        }
                         const { error } = await supabase
                             .from("messages")
                             .delete()

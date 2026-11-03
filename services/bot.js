@@ -5,7 +5,6 @@ dotenv.config();
 
 export function BotInit(supabase) {
     const botNick = "ATBot";
-    console.log("API KEY:", process.env.OPENROUTER_API_KEY);
 
     return {
         botNick,
@@ -106,7 +105,7 @@ export function BotInit(supabase) {
                 // 6. Рассылаем новое сообщение по WebSocket
                 broadcastNewMessage(chatId, botMsg);
             } catch (err) {
-                console.error("AI Error:", err);
+                console.error("AI request failed", { status: err?.response?.status, code: err?.code });
                 const errorMessage = "Извините, произошла ошибка при работе с ИИ.";
 
                 const { data: botUser, error: botErr } = await supabase

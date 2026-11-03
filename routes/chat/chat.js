@@ -6,6 +6,7 @@ import path from "path";
 import { BotInit } from "../../services/bot.js";
 import resolveOriginalRedirect from "../../utils/resolveRedirect.js";
 import { getChatMessages } from "../../utils/getChatMessages.js";
+import { canAccessMessage } from "../../utils/messageAccess.js";
 
 export default function (app, supabase) {
   const upload = multer({ storage: multer.memoryStorage() });
@@ -571,6 +572,7 @@ export default function (app, supabase) {
 
   // ====================== PATCH /messages/:id ======================
   app.patch("/messages/:id", authenticateUser(supabase), upload.array("files"), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id: userId } = req.user;
     const messageId = parseInt(req.params.id);
     const { text, answer_id, kept_urls } = req.body;
@@ -592,7 +594,7 @@ export default function (app, supabase) {
         return res.status(404).json({ success: false, error: "Сообщение не найдено" });
       }
 
-      if (message.sender_id !== userId) {
+      if (message.sender_id !== userId || !(await canAccessMessage(supabase, message, userId))) {
         return res.status(403).json({ success: false, error: "Вы не автор сообщения" });
       }
 
@@ -670,6 +672,7 @@ export default function (app, supabase) {
 
   // ====================== POST /chat/read ======================
   app.post("/chat/read", authenticateUser(supabase), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id } = req.user;
     const { messageId } = req.body;
 
@@ -680,7 +683,7 @@ export default function (app, supabase) {
     try {
       const { data: msg, error: msgError } = await supabase
         .from("messages")
-        .select("id, read_by, chat_id")
+        .select("id, read_by, chat_id, hidden")
         .eq("id", messageId)
         .single();
 
@@ -688,11 +691,14 @@ export default function (app, supabase) {
         return res.status(404).json({ success: false, error: "Сообщение не найдено" });
       }
 
-      if (!msg.read_by.includes(id)) {
+      if (!(await canAccessMessage(supabase, msg, id))) {
+        return res.status(403).json({ success: false, error: "Нет доступа к сообщению" });
+      }
+      if (!(msg.read_by || []).includes(id)) {
         await supabase
           .from("messages")
           .update({
-            read_by: [...msg.read_by, id],
+            read_by: [...(msg.read_by || []), id],
           })
           .eq("id", messageId);
 

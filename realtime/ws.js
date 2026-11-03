@@ -145,21 +145,26 @@ export function broadcastMessageRead(chat_id, messageId, userId) {
       });
     });
 }
-export function broadcastReaction(payload) {
-  const { messageId, user_id, reaction, removed } = payload;
-  for (const sockets of clientsMap.values()) {
-    sockets.forEach(ws => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: "MESSAGE_REACTION",
-          messageId,
-          user_id,
-          reaction,
-          removed
-        }));
-      }
-    });
+async function broadcastChatEvent(chatId, payload, onlyUserId = null) {
+  try {
+    const { data: members, error } = await supabaseGlobal.from("chat_members")
+      .select("user_id,is_blocked").eq("chat_id", chatId);
+    if (error) throw error;
+    const encoded = JSON.stringify(payload);
+    for (const member of members || []) {
+      if (member.is_blocked || (onlyUserId && member.user_id !== onlyUserId)) continue;
+      clientsMap.get(member.user_id)?.forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(encoded);
+      });
+    }
+  } catch {
+    console.error("Chat event delivery failed");
   }
+}
+
+export function broadcastReaction(chatId, payload) {
+  const { messageId, user_id, reaction, removed } = payload;
+  return broadcastChatEvent(chatId, { type: "MESSAGE_REACTION", messageId, user_id, reaction, removed });
 }
 export function broadcastKicked(payload) {
   const { id: targetUserId, group_id, group_name, reason } = payload;
@@ -178,20 +183,9 @@ export function broadcastKicked(payload) {
   }
 }
 export function broadcastMessageDeleted(chat_id, messageId, userId = null) {
-    console.log("Broadcasting MESSAGE_DELETED", { chat_id, messageId, userId });
-    for (const sockets of clientsMap.values()) {
-        sockets.forEach(ws => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: "MESSAGE_DELETED",
-                    chatId: chat_id,
-                    messageId,
-                    userId
-                }));
-                console.log("Sent to a client");
-            }
-        });
-    }
+  return broadcastChatEvent(chat_id, {
+    type: "MESSAGE_DELETED", chatId: chat_id, messageId, userId
+  }, userId);
 }
 export async function broadcastGroupUpdated(chat_id) {
   console.log("Broadcasting GROUP_UPDATED", {chat_id});
@@ -257,9 +251,11 @@ export function broadcastTimerUpdate(userId, habitId, timerData) {
 }
 export default function initWebSocket(supabase, server) {
   supabaseGlobal = supabase;
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 16 * 1024 });
   clientsMap = new Map();
   wss.on("connection", async (ws, req) => {
+    ws.on("error", () => {});
+    try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const ticket = url.searchParams.get("ticket");
     const allowed = (process.env.CLIENT_URL || "https://achievetogether.vercel.app").split(",").map(x => x.trim());
@@ -345,7 +341,11 @@ export default function initWebSocket(supabase, server) {
       }
     }, 60000);
     ws.on("message", async (msg) => {
-      const data = JSON.parse(msg.toString());
+      try {
+      let data;
+      try { data = JSON.parse(msg.toString()); } catch { return; }
+      if (!data || typeof data !== "object" || Array.isArray(data)) return;
+      if (typeof data.to !== "string" && typeof data.to !== "number") return;
       if (data.type === "TYPING" || data.type === "STOP_TYPING") {
         // Получаем информацию об отправителе
         const { data: fromUser } = await supabaseGlobal
@@ -355,7 +355,9 @@ export default function initWebSocket(supabase, server) {
           .single();
 
         const payload = JSON.stringify({
-          ...data,
+          type: data.type,
+          to: data.to,
+          is_group: data.is_group === true,
           from: userId,
           sender_name: fromUser?.username || fromUser?.nick || 'Аноним',
           chat_id: data.is_group ? data.to : null
@@ -365,11 +367,12 @@ export default function initWebSocket(supabase, server) {
           const groupId = data.to;
           const { data: members } = await supabaseGlobal
             .from("chat_members")
-            .select("user_id")
+            .select("user_id,is_blocked")
             .eq("chat_id", groupId);
+          if (!members?.some(member => member.user_id === userId && !member.is_blocked)) return;
           if (members) {
             members.forEach(member => {
-              if (member.user_id !== userId) { // Исключаем отправителя
+              if (member.user_id !== userId && !member.is_blocked) { // Исключаем отправителя
                 const sockets = clientsMap.get(member.user_id);
                 sockets?.forEach(s => {
                   if (s.readyState === WebSocket.OPEN) {
@@ -403,6 +406,9 @@ export default function initWebSocket(supabase, server) {
           });
         }
       }
+      } catch {
+        console.error("WebSocket message handling failed");
+      }
     });
     ws.on("close", async () => {
       console.log(`🔴 WS disconnected: user ${userId}`);
@@ -417,6 +423,9 @@ export default function initWebSocket(supabase, server) {
         broadcastUserStatus(userId, false);
       }
     });
+    } catch {
+      ws.close(1011, "Authentication unavailable");
+    }
   });
   broadcastUserStatus = async function (userId, isOnline) {
     let last_online = null;
@@ -451,4 +460,5 @@ export default function initWebSocket(supabase, server) {
     }
   }
   console.log("WebSocket initialized on /ws");
+  return wss;
 }
