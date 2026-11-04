@@ -9,6 +9,21 @@ export default function (app, supabase) {
         if (!id) return res.status(401).json({ error: 'User not authenticated' });
 
         try {
+            if (setting === "bg_effects") {
+                const filters = ["none", "grayscale", "sepia", "invert", "contrast", "saturate"];
+                if (!value || typeof value !== "object" || Array.isArray(value) ||
+                    !Number.isFinite(value.blur) || value.blur < 0 || value.blur > 30 ||
+                    typeof value.movement !== "boolean" || !filters.includes(value.filter)) {
+                    return res.status(400).json({ success: false, error: "Некорректные параметры фона" });
+                }
+                const effects = { blur: Math.round(value.blur), movement: value.movement, filter: value.filter };
+                const { error } = await supabase.from("settings").upsert({
+                    user_id: id,
+                    bg_effects: effects
+                }, { onConflict: "user_id" });
+                if (error) throw error;
+                return res.json({ success: true, bg_effects: effects });
+            }
             if (setting === "quick_actions") {
                 const types = new Set(["feed", "settings", "profile", "habits", "habit", "chat"]);
                 if (!Array.isArray(value) || value.length > 3) {
