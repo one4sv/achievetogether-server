@@ -19,11 +19,10 @@ export default function (app, supabase) {
     const auth = authenticateUser(supabase);
     const getGallery = async (id) => {
         const { data, error } = await supabase.from("settings")
-            .select("bg_gallery, bg_url").eq("user_id", id).maybeSingle();
+            .select("bg_gallery").eq("user_id", id).maybeSingle();
         if (error) throw error;
         return {
-            gallery: Array.isArray(data?.bg_gallery) ? data.bg_gallery : [],
-            current: data?.bg_url || ""
+            gallery: Array.isArray(data?.bg_gallery) ? data.bg_gallery : []
         };
     };
 
@@ -56,8 +55,7 @@ export default function (app, supabase) {
             const next = [...gallery, { path: filePath, url: publicUrl }];
             const { error } = await supabase.from("settings").upsert({
                 user_id: userId,
-                bg_gallery: next,
-                bg_url: publicUrl
+                bg_gallery: next
             }, { onConflict: "user_id" });
             if (error) throw error;
 
@@ -69,7 +67,7 @@ export default function (app, supabase) {
         }
     });
 
-    app.post("/backgrounds/select", auth, async (req, res) => {
+    app.post("/backgrounds/delete", auth, async (req, res) => {
         const userId = req.user?.id;
         if (!userId) return res.status(401).json({ success: false, error: "Не авторизован" });
         const url = req.body?.url;
@@ -80,39 +78,16 @@ export default function (app, supabase) {
             const { gallery } = await getGallery(userId);
             const selected = gallery.find(item => item.url === url);
             if (!selected) return res.status(404).json({ success: false, error: "Фон не найден" });
-
-            const { error } = await supabase.from("settings")
-                .update({ bg_url: selected.url }).eq("user_id", userId);
-            if (error) throw error;
-            return res.json({ success: true, bg_url: selected.url });
-        } catch (error) {
-            console.error("[backgrounds/select]", error);
-            return res.status(500).json({ success: false, error: "Не удалось выбрать фон" });
-        }
-    });
-
-    app.post("/backgrounds/delete", auth, async (req, res) => {
-        const userId = req.user?.id;
-        if (!userId) return res.status(401).json({ success: false, error: "Не авторизован" });
-        const url = req.body?.url;
-        if (typeof url !== "string" || url.length > 2048) {
-            return res.status(400).json({ success: false, error: "Некорректный фон" });
-        }
-        try {
-            const { gallery, current } = await getGallery(userId);
-            const selected = gallery.find(item => item.url === url);
-            if (!selected) return res.status(404).json({ success: false, error: "Фон не найден" });
             const next = gallery.filter(item => item.url !== url);
-            const nextCurrent = current === url ? (next[0]?.url || "") : current;
             const { error } = await supabase.from("settings")
-                .update({ bg_gallery: next, bg_url: nextCurrent }).eq("user_id", userId);
+                .update({ bg_gallery: next }).eq("user_id", userId);
             if (error) throw error;
 
             if (typeof selected.path === "string" && selected.path.startsWith(`user_${userId}_bg_`)) {
                 const { error: storageError } = await supabase.storage.from("bgs").remove([selected.path]);
                 if (storageError) console.error("[backgrounds/delete/storage]", storageError);
             }
-            return res.json({ success: true, bg_gallery: next, bg_url: nextCurrent });
+            return res.json({ success: true, bg_gallery: next });
         } catch (error) {
             console.error("[backgrounds/delete]", error);
             return res.status(500).json({ success: false, error: "Не удалось удалить фон" });
