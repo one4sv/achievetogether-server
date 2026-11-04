@@ -9,6 +9,19 @@ export default function (app, supabase) {
         if (!id) return res.status(401).json({ error: 'User not authenticated' });
 
         try {
+            if (setting === "chat_welcome") {
+                if (!value || typeof value !== "object" || Array.isArray(value) ||
+                    typeof value.enabled !== "boolean" || typeof value.text !== "string" ||
+                    value.text.length > 500 || (value.enabled && !value.text.trim())) {
+                    return res.status(400).json({ success: false, error: "Некорректное приветственное сообщение" });
+                }
+                const { error } = await supabase.from("settings").upsert({
+                    user_id: id,
+                    chat_welcome: { enabled: value.enabled, text: value.text.trim() },
+                }, { onConflict: "user_id" });
+                if (error) throw error;
+                return res.json({ success: true });
+            }
             if (setting === "group_invites") {
                 const modes = ["direct", "message", "none"];
                 if (!value || typeof value !== "object" || !modes.includes(value.contacts) || !modes.includes(value.others)) {

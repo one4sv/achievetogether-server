@@ -154,8 +154,40 @@ export default function (app, supabase) {
         }
       }
 
+      // A greeting is a preview of the recipient's settings, not a stored message.
+      // Check the entire conversation history, including hidden messages.
+      let welcomeMessage = null;
+      if (chatWith.id !== id && !chatMember.is_blocked && !chatWith.am_i_blocked) {
+        let hasHistory = false;
+
+        if (chatId) {
+          const { count, error: historyError } = await supabase
+            .from("messages")
+            .select("id", { count: "exact", head: true })
+            .eq("chat_id", chatId);
+
+          if (historyError) throw historyError;
+          hasHistory = (count || 0) > 0;
+        }
+
+        if (!hasHistory) {
+          const { data: ownerSettings, error: welcomeError } = await supabase
+            .from("settings")
+            .select("chat_welcome")
+            .eq("user_id", chatWith.id)
+            .maybeSingle();
+
+          if (welcomeError) throw welcomeError;
+          const greeting = ownerSettings?.chat_welcome;
+          if (greeting?.enabled === true && typeof greeting.text === "string" && greeting.text.trim()) {
+            welcomeMessage = greeting.text.trim();
+          }
+        }
+      }
+
       res.json({
         success: true,
+        welcome_message: welcomeMessage,
         user: {
           id: chatWith.id,
           nick: chatWith.nick,
