@@ -16,21 +16,26 @@ export default function(app, supabase) {
     }
 
     try {
+      const email = typeof login === "string" ? login.trim().toLowerCase() : "";
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+          typeof pass !== "string" || pass.length > 256) {
+        return res.status(400).json({ success: false, error: "Укажите корректный email и пароль" });
+      }
       const { data: users, error: fetchError } = await supabase
         .from("users")
         .select("id, mail, nick, pass")
-        .or(`mail.eq.${login},nick.eq.${login}`)
+        .eq("mail", email)
         .limit(1);
 
       if (fetchError || !users || users.length === 0) {
-        return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
+        return res.status(401).json({ success: false, error: "Неверный email или пароль" });
       }
 
       const user = users[0];
 
       // 2️⃣ Проверяем пароль
       const valid = await bcrypt.compare(pass, user.pass);
-      if (!valid) return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
+      if (!valid) return res.status(401).json({ success: false, error: "Неверный email или пароль" });
 
       // 3️⃣ Получаем настройки, чтобы проверить двухфакторку
       const { data: settings, error: settingsError } = await supabase

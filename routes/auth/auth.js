@@ -17,25 +17,20 @@ export default function(app, supabase) {
     }
 
     try {
-      const identity = typeof login === "string" ? login.trim() : "";
-      if (identity.length > 254 || !identity || typeof pass !== "string" || pass.length > 256) {
-        return res.status(400).json({ success: false, error: "Неверные данные входа" });
+      const email = typeof login === "string" ? login.trim().toLowerCase() : "";
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+          typeof pass !== "string" || pass.length > 256) {
+        return res.status(400).json({ success: false, error: "Укажите корректный email и пароль" });
       }
-      const { data: byEmail, error: emailError } = await supabase.from("users")
-        .select("id, mail, nick, pass").eq("mail", identity.toLowerCase()).maybeSingle();
+
+      const { data: user, error: emailError } = await supabase.from("users")
+        .select("id, mail, nick, pass").eq("mail", email).maybeSingle();
       if (emailError) throw emailError;
-      let user = byEmail;
-      if (!user) {
-        const { data: byNick, error: nickError } = await supabase.from("users")
-          .select("id, mail, nick, pass").eq("nick", identity).maybeSingle();
-        if (nickError) throw nickError;
-        user = byNick;
-      }
-      if (!user) return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
+      if (!user) return res.status(401).json({ success: false, error: "Неверный email или пароль" });
 
       // 2️⃣ Проверяем пароль
       const valid = await bcrypt.compare(pass, user.pass);
-      if (!valid) return res.status(401).json({ success: false, error: "Неверный логин или пароль" });
+      if (!valid) return res.status(401).json({ success: false, error: "Неверный email или пароль" });
 
       // 3️⃣ Получаем настройки, чтобы проверить двухфакторку
       const { data: settings, error: settingsError } = await supabase
