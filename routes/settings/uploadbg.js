@@ -38,8 +38,8 @@ export default function (app, supabase) {
         let filePath = null;
         try {
             const { gallery } = await getGallery(userId);
-            if (gallery.length >= 5) {
-                return res.status(409).json({ success: false, error: "Можно сохранить не более пяти фонов" });
+            if (gallery.length >= 6) {
+                return res.status(409).json({ success: false, error: "Можно сохранить не более шести фонов" });
             }
 
             filePath = `user_${userId}_bg_${randomUUID()}.${mimeExtensions[file.mimetype]}`;
