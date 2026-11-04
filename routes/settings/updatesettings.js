@@ -15,7 +15,7 @@ export default function (app, supabase) {
                     !Number.isFinite(value.blur) || value.blur < 0 || value.blur > 30 ||
                     typeof value.movement !== "boolean" || !filters.includes(value.filter) ||
                     (value.speed !== undefined &&
-                        (!Number.isFinite(value.speed) || value.speed < 0.5 || value.speed > 3))) {
+                        (!Number.isFinite(value.speed) || value.speed < 0 || value.speed > 3))) {
                     return res.status(400).json({ success: false, error: "Некорректные параметры фона" });
                 }
                 const effects = {
