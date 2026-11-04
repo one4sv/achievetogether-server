@@ -13,10 +13,17 @@ export default function (app, supabase) {
                 const filters = ["none", "grayscale", "sepia", "invert", "contrast", "saturate"];
                 if (!value || typeof value !== "object" || Array.isArray(value) ||
                     !Number.isFinite(value.blur) || value.blur < 0 || value.blur > 30 ||
-                    typeof value.movement !== "boolean" || !filters.includes(value.filter)) {
+                    typeof value.movement !== "boolean" || !filters.includes(value.filter) ||
+                    (value.speed !== undefined &&
+                        (!Number.isFinite(value.speed) || value.speed < 0.5 || value.speed > 3))) {
                     return res.status(400).json({ success: false, error: "Некорректные параметры фона" });
                 }
-                const effects = { blur: Math.round(value.blur), movement: value.movement, filter: value.filter };
+                const effects = {
+                    blur: Math.round(value.blur),
+                    movement: value.movement,
+                    filter: value.filter,
+                    speed: Math.round((value.speed ?? 1) * 4) / 4
+                };
                 const { error } = await supabase.from("settings").upsert({
                     user_id: id,
                     bg_effects: effects
