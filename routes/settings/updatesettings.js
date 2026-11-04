@@ -9,6 +9,43 @@ export default function (app, supabase) {
         if (!id) return res.status(401).json({ error: 'User not authenticated' });
 
         try {
+            if (setting === "quick_actions") {
+                const types = new Set(["feed", "settings", "profile", "habits", "habit", "chat"]);
+                if (!Array.isArray(value) || value.length > 3) {
+                    return res.status(400).json({ success: false, error: "Максимум три быстрых действия" });
+                }
+
+                const ids = new Set();
+                const safe = [];
+
+                for (const action of value) {
+                    if (!action || typeof action !== "object" || Array.isArray(action) ||
+                        !types.has(action.type)) {
+                        return res.status(400).json({ success: false, error: "Неверное быстрое действие" });
+                    }
+                    const dynamic = action.type === "habit" || action.type === "chat";
+                    const target = typeof action.target === "string" ? action.target : "";
+                    const label = typeof action.label === "string" ? action.label.trim() : "";
+                    if (dynamic && (!target || target.length > 120 || label.length > 80 ||
+                        !(action.type === "habit"
+                            ? /^[1-9][0-9]{0,11}$/.test(target)
+                            : /^(?:g\/)?[\p{L}\p{N}_-]{1,100}$/u.test(target)))) {
+                        return res.status(400).json({ success: false, error: "Некорректный адрес быстрого действия" });
+                    }
+                    const key = action.type + ":" + (dynamic ? target : "");
+                    if (ids.has(key)) return res.status(400).json({ success: false, error: "Повторяющееся быстрое действие" });
+                    ids.add(key);
+                    safe.push(dynamic ? { type: action.type, target, label } : { type: action.type });
+                }
+
+                const { error } = await supabase.from("settings").upsert({
+                    user_id: id,
+                    quick_actions: safe
+                }, { onConflict: "user_id" });
+                if (error) throw error;
+                return res.json({ success: true, quick_actions: safe });
+            }
+
             if (setting === "chat_welcome") {
                 if (!value || typeof value !== "object" || Array.isArray(value) ||
                     typeof value.enabled !== "boolean" || typeof value.text !== "string" ||

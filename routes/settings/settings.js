@@ -61,6 +61,7 @@ export default function (app, supabase) {
                 order: data.order,
                 private: data.private,
                 chat_welcome: data.chat_welcome ?? { enabled: false, text: "" },
+                quick_actions: Array.isArray(data.quick_actions) ? data.quick_actions : [],
                 group_invites: { contacts: data.group_invite_contacts ?? "message", others: data.group_invite_others ?? "none" },
                 bg_url: data.bg_url,
                 twoAuth: data.two_auth,
