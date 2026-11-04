@@ -63,7 +63,6 @@ export default function (app, supabase) {
                 chat_welcome: data.chat_welcome ?? { enabled: false, text: "" },
                 quick_actions: Array.isArray(data.quick_actions) ? data.quick_actions : [],
                 group_invites: { contacts: data.group_invite_contacts ?? "message", others: data.group_invite_others ?? "none" },
-                bg_url: data.bg_url,
                 bg_gallery: Array.isArray(data.bg_gallery) ? data.bg_gallery : [],
                 bg_effects: data.bg_effects ?? { blur: 0, movement: false, filter: "none" },
                 twoAuth: data.two_auth,
