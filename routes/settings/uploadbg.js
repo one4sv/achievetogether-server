@@ -4,7 +4,7 @@ import { authenticateUser } from "../../middleware/token.js";
 
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 }
+    limits: { fileSize: 25 * 1024 * 1024 }
 });
 
 const mimeExtensions = {
@@ -37,8 +37,8 @@ export default function (app, supabase) {
         let filePath = null;
         try {
             const { gallery } = await getGallery(userId);
-            if (gallery.length >= 6) {
-                return res.status(409).json({ success: false, error: "Можно сохранить не более шести фонов" });
+            if (gallery.length >= 5) {
+                return res.status(409).json({ success: false, error: "Можно сохранить не более пяти фонов" });
             }
 
             filePath = `user_${userId}_bg_${randomUUID()}.${mimeExtensions[file.mimetype]}`;
