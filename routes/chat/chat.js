@@ -113,7 +113,9 @@ export default function (app, supabase) {
           .eq("user_id", id)
           .single();
 
-        if (!cm || cm.is_blocked) {
+        // Users retain access to their personal chat history while blocked,
+        // so they can review it and remove the block.
+        if (!cm) {
           return res.status(403).json({ success: false, error: "Нет доступа к чату" });
         }
         chatMember = cm;
@@ -453,6 +455,21 @@ export default function (app, supabase) {
         }
       } else {
         return res.status(400).json({ success: false, error: "Не указан получатель или группа" });
+      }
+
+      // Personal chat blocks are not a history access restriction. They do
+      // prevent new messages from either side until the block is removed.
+      const { data: destinationChat, error: destinationError } = await supabase.from("chats")
+        .select("is_group").eq("id", chatId).maybeSingle();
+      if (destinationError || !destinationChat) throw destinationError || new Error("Chat not found");
+      if (!destinationChat.is_group) {
+        const { data: participants, error: participantsError } = await supabase.from("chat_members")
+          .select("user_id, is_blocked").eq("chat_id", chatId);
+        if (participantsError) throw participantsError;
+        if (!participants?.some(participant => participant.user_id === senderId) ||
+            participants.some(participant => participant.is_blocked)) {
+          return res.status(403).json({ success: false, error: "Чат заблокирован" });
+        }
       }
 
       // An integer message id is not proof of access. Verify each source message,
