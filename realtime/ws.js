@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createHash } from "node:crypto";
+import { deliverMessagePush } from "../services/push.js";
 let clientsMap = new Map();
 let supabaseGlobal;
 let broadcastUserStatus;
@@ -27,7 +28,7 @@ export async function broadcastNewMessage(chat_id, message) {
 
     const { data: members } = await supabaseGlobal
       .from("chat_members")
-      .select("user_id, note")
+      .select("user_id, note, is_blocked")
       .eq("chat_id", chat_id);
 
     if (!members || members.length === 0) {
@@ -62,6 +63,14 @@ export async function broadcastNewMessage(chat_id, message) {
       const chatNote = member.note ?? true;
       console.log("UserId:", userId, "allNote:", allNote, "newMessNote:", newMessNote, "chatNote:", chatNote);
      
+      if (member.is_blocked) continue;
+      if (userId !== senderId && allNote && newMessNote && chatNote) {
+        void deliverMessagePush(supabaseGlobal, {
+          userId, senderId, senderName: senderData?.username,
+          senderNick: senderData?.nick, chatId: chat_id,
+          chatName: chat.name, isGroup: chat.is_group, message
+        }).catch(error => console.warn("Push dispatch failed:", error.message));
+      }
       if ((allNote && newMessNote && chatNote) || message.habit_invite_habit_id) {
         const sockets = clientsMap.get(userId);
         sockets?.forEach(s => {

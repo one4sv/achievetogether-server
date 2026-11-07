@@ -12,6 +12,7 @@ import addhabitRoutes from "./habits/addhabit.js";
 import habitsRoutes from "./habits/habits.js";
 import habitMembersRoutes from "./habits/members.js";
 import settingsRoutes from "./settings/settings.js";
+import pushRoutes from "./settings/push.js";
 import updatesettingsRoutes from "./settings/updatesettings.js";
 import updatehabitRoutes from "./habits/updatehabit.js";
 import contactsRoutes from "./chat/contacts.js";
@@ -67,6 +68,7 @@ export default function registerAllRoutes(app, supabase) {
     habitMembersRoutes(app, supabase);
     habitsRoutes(app, supabase);
     settingsRoutes(app, supabase);
+    pushRoutes(app, supabase);
     updatesettingsRoutes(app, supabase);
     updatehabitRoutes(app, supabase);
     contactsRoutes(app, supabase);
