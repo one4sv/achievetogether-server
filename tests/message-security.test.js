@@ -46,7 +46,7 @@ function database(overrides = {}) {
     } };
 }
 
-async function call(register, route, db, user, body) {
+async function call(register, route, db, user, body, params = { id: "1" }) {
     const routes = new Map();
     const app = Object.fromEntries(["get", "post", "patch"].map(method => [method,
         (path, ...handlers) => routes.set(path, handlers.at(-1))]));
@@ -56,7 +56,7 @@ async function call(register, route, db, user, body) {
         status(value) { result.status = value; return res; },
         json(value) { result.body = value; return res; }
     };
-    await routes.get(route)({ user: user ? { id: user } : null, body, params: { id: "1" }, files: [] }, res);
+    await routes.get(route)({ user: user ? { id: user } : null, body, params, files: [] }, res);
     return result;
 }
 
@@ -180,6 +180,25 @@ test("reply cannot point to a message from another chat", async () => {
 test("blocked group member cannot send messages", async () => {
     const db = database();
     const result = await call(chats, "/chat", db, "blocked", { chat_id: 10, text: "blocked" });
+    assert.equal(result.status, 403);
+    assert.deepEqual(db.writes, []);
+});
+
+test("anonymous users cannot read private or group chat history", async () => {
+    const db = database();
+    for (const [route, params] of [
+        ["/chat/:nick", { nick: "member" }],
+        ["/chat/group/:id", { id: "10" }]
+    ]) {
+        const result = await call(chats, route, db, null, {}, params);
+        assert.equal(result.status, 401);
+    }
+    assert.deepEqual(db.writes, []);
+});
+
+test("blocked group member cannot load chat messages", async () => {
+    const db = database();
+    const result = await call(chats, "/chat/group/:id", db, "blocked", {}, { id: "10" });
     assert.equal(result.status, 403);
     assert.deepEqual(db.writes, []);
 });
