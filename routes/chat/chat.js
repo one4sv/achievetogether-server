@@ -7,9 +7,11 @@ import { BotInit } from "../../services/bot.js";
 import resolveOriginalRedirect from "../../utils/resolveRedirect.js";
 import { getChatMessages } from "../../utils/getChatMessages.js";
 import { canAccessMessage } from "../../utils/messageAccess.js";
+import { hasServerPermission } from "../../utils/hasPermission.js";
+import { PERMS } from "../../config/permissions.js";
 
 export default function (app, supabase) {
-  const upload = multer({ storage: multer.memoryStorage() });
+  const upload = multer({ storage: multer.memoryStorage(), limits: { files: 20, fileSize: 10 * 1024 * 1024, fieldSize: 2 * 1024 * 1024 } });
 
   app.get("/chat", (req, res) => {
     res.send("Chat api is working...");
@@ -307,6 +309,7 @@ export default function (app, supabase) {
 
   // ====================== POST /chat (отправка сообщения) ======================
   app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id: senderId } = req.user;
     const { receiver_nick, chat_id: reqChatId, text, answer_id } = req.body;
 
@@ -314,7 +317,15 @@ export default function (app, supabase) {
     let show_names = true;
 
     if (req.body.redirect) {
-      redirect = JSON.parse(req.body.redirect);
+      try {
+        redirect = typeof req.body.redirect === "string" ? JSON.parse(req.body.redirect) : req.body.redirect;
+      } catch {
+        return res.status(400).json({ success: false, error: "Некорректная пересылка" });
+      }
+      if (!Array.isArray(redirect) || redirect.length > 20 ||
+          redirect.some(id => !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) {
+        return res.status(400).json({ success: false, error: "Некорректная пересылка" });
+      }
       show_names = req.body.showNames === "1";
     }
 
@@ -333,12 +344,12 @@ export default function (app, supabase) {
 
         const { data: member } = await supabase
           .from("chat_members")
-          .select("id")
+          .select("id, is_blocked")
           .eq("chat_id", chatId)
           .eq("user_id", senderId)
           .single();
 
-        if (!member) {
+        if (!member || member.is_blocked) {
           return res.status(403).json({ success: false, error: "Нет доступа к группе" });
         }
       }
@@ -439,12 +450,42 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Не указан получатель или группа" });
       }
 
-      // Resolve redirect'ов
+      // An integer message id is not proof of access. Verify each source message,
+      // including an already-forwarded wrapper, before resolving its original.
       const resolvedRedirects = [];
       if (redirect.length > 0) {
+        const { data: targetChat, error: chatError } = await supabase.from("chats")
+          .select("is_group").eq("id", chatId).maybeSingle();
+        if (chatError || !targetChat) throw chatError || new Error("Chat not found");
+        if (targetChat.is_group && !(await hasServerPermission(supabase, chatId, senderId, PERMS.redirect_messages))) {
+          return res.status(403).json({ success: false, error: "Нет прав на пересылку" });
+        }
         for (const rid of redirect) {
-          const originalId = await resolveOriginalRedirect(supabase, rid);
-          resolvedRedirects.push(originalId);
+          const { data: source, error: sourceError } = await supabase.from("messages")
+            .select("id, chat_id, hidden").eq("id", Number(rid)).maybeSingle();
+          if (sourceError) throw sourceError;
+          if (!source || !(await canAccessMessage(supabase, source, senderId))) {
+            return res.status(403).json({ success: false, error: "Нет доступа к пересылаемому сообщению" });
+          }
+          const { data: sourceChat, error: sourceChatError } = await supabase.from("chats")
+            .select("is_group").eq("id", source.chat_id).maybeSingle();
+          if (sourceChatError) throw sourceChatError;
+          if (sourceChat?.is_group && !(await hasServerPermission(supabase, source.chat_id, senderId, PERMS.redirect_messages))) {
+            return res.status(403).json({ success: false, error: "Нет прав на пересылку" });
+          }
+          resolvedRedirects.push(await resolveOriginalRedirect(supabase, source.id));
+        }
+      }
+
+      if (answer_id !== undefined && answer_id !== null && answer_id !== "") {
+        if (!Number.isSafeInteger(Number(answer_id)) || Number(answer_id) <= 0) {
+          return res.status(400).json({ success: false, error: "Некорректный ответ" });
+        }
+        const { data: quoted, error: quotedError } = await supabase.from("messages")
+          .select("id, chat_id, hidden").eq("id", Number(answer_id)).eq("chat_id", chatId).maybeSingle();
+        if (quotedError) throw quotedError;
+        if (!quoted || !(await canAccessMessage(supabase, quoted, senderId))) {
+          return res.status(403).json({ success: false, error: "Нет доступа к сообщению для ответа" });
         }
       }
 
