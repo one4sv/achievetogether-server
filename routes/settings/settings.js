@@ -66,6 +66,8 @@ export default function (app, supabase) {
                 bg_gallery: Array.isArray(data.bg_gallery) ? data.bg_gallery : [],
                 bg_effects: data.bg_effects ?? { blur: 0, movement: false, filter: "none" },
                 twoAuth: data.two_auth,
+                all_note: data.all_note ?? true,
+                new_mess_note: data.new_mess_note ?? true,
                 show_archived: data.show_archived,
                 show_archived_in_acc: data.show_archived_in_acc,
                 week_start: data.week_start
