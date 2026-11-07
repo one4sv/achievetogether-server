@@ -210,6 +210,16 @@ export default function (app, supabase) {
                 }
 
                 chatId = shared[0].chat_id;
+                const { data: ownMember, error: ownMemberError } = await supabase
+                    .from("chat_members")
+                    .select("is_blocked")
+                    .eq("chat_id", chatId)
+                    .eq("user_id", userId)
+                    .maybeSingle();
+                if (ownMemberError) throw ownMemberError;
+                if (!ownMember || ownMember.is_blocked) {
+                    return res.status(403).json({ success: false, error: "Access denied" });
+                }
             }
 
             let beforeId = null;
