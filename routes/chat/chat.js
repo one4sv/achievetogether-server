@@ -448,11 +448,6 @@ export default function (app, supabase) {
           }
         }
 
-        // Бот
-        if (receiver_nick === "ATBot") {
-          const bot = BotInit(supabase);
-          bot.handleMessage({ chatId, userMessage: text });
-        }
       } else {
         return res.status(400).json({ success: false, error: "Не указан получатель или группа" });
       }
@@ -656,6 +651,12 @@ export default function (app, supabase) {
 
         broadcastNewMessage(chatId, completeMessage);
         finalResponseMessages.push(completeMessage);
+      }
+
+      // Do not trigger the bot before all blocking and authorization checks.
+      if (receiver_nick === "ATBot") {
+        const bot = BotInit(supabase);
+        void bot.handleMessage({ chatId, userMessage: text });
       }
 
       res.json({ success: true, messages: finalResponseMessages });
