@@ -56,7 +56,7 @@ async function call(register, route, db, user, body, params = { id: "1" }) {
         status(value) { result.status = value; return res; },
         json(value) { result.body = value; return res; }
     };
-    await routes.get(route)({ user: user ? { id: user } : null, body, params, files: [] }, res);
+    await routes.get(route)({ user: user ? { id: user } : null, body, params, query: {}, files: [] }, res);
     return result;
 }
 
@@ -198,7 +198,7 @@ test("anonymous users cannot read private or group chat history", async () => {
 
 test("blocked group member cannot load chat messages", async () => {
     const db = database();
-    const result = await call(chats, "/chat/group/:id", db, "blocked", {}, { id: "10" });
+    const result = await call(chats, "/chat/group/:id", db, "blocked", {}, { id: 10 });
     assert.equal(result.status, 403);
     assert.deepEqual(db.writes, []);
 });
