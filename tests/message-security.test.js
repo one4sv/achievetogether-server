@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import reactions from "../routes/chat/reaction.js";
+import pins from "../routes/chat/pinmess.js";
+import media from "../routes/chat/ChatMedia.js";
 import deletes from "../routes/system/delete.js";
 import chats from "../routes/chat/chat.js";
 import initWebSocket from "../realtime/ws.js";
@@ -117,4 +119,67 @@ test("member can react and read; author can delete their own message", async t =
     assert.deepEqual(db.rows.messages[0].read_by, ["member"]);
     assert.equal((await call(deletes, "/delete", db, "owner", { goal: "messForAll", delete_id: 1 })).status, 200);
     assert.deepEqual(db.rows.messages, []);
+});
+
+test("anonymous requests cannot send messages, pin messages or list private media", async () => {
+    const db = database();
+    const routes = [
+        [chats, "/chat", { chat_id: 10, text: "hello" }],
+        [pins, "/pinmess", { message_id: 1 }],
+        [media, "/media/:type/:id", {}]
+    ];
+    for (const [register, route, body] of routes) {
+        const result = await call(register, route, db, null, body);
+        assert.equal(result.status, 401);
+    }
+    assert.deepEqual(db.writes, []);
+});
+
+test("non-member and blocked members cannot pin group messages", async () => {
+    for (const user of ["outsider", "blocked", "member"]) {
+        const db = database();
+        const result = await call(pins, "/pinmess", db, user, { message_id: 1 });
+        assert.equal(result.status, 403);
+        assert.deepEqual(db.writes, []);
+    }
+});
+
+test("a member cannot forward a message from a different private chat", async () => {
+    const db = database();
+    db.rows.messages.push({ id: 2, chat_id: 11, sender_id: "stranger", hidden: [] });
+    const result = await call(chats, "/chat", db, "owner", { chat_id: 10, redirect: "[2]" });
+    assert.equal(result.status, 403);
+    assert.deepEqual(db.writes, []);
+});
+
+test("forwarding a hidden message is forbidden even for its former chat member", async () => {
+    const db = database();
+    db.rows.messages[0].hidden = ["owner"];
+    const result = await call(chats, "/chat", db, "owner", { chat_id: 10, redirect: "[1]" });
+    assert.equal(result.status, 403);
+    assert.deepEqual(db.writes, []);
+});
+
+test("malformed forwarded IDs do not cause writes", async () => {
+    for (const redirect of ["not-json", "[\"not-a-number\"]", "[0]", "{}"]) {
+        const db = database();
+        const result = await call(chats, "/chat", db, "owner", { chat_id: 10, redirect });
+        assert.equal(result.status, 400);
+        assert.deepEqual(db.writes, []);
+    }
+});
+
+test("reply cannot point to a message from another chat", async () => {
+    const db = database();
+    db.rows.messages.push({ id: 2, chat_id: 11, sender_id: "stranger", hidden: [] });
+    const result = await call(chats, "/chat", db, "owner", { chat_id: 10, text: "reply", answer_id: 2 });
+    assert.equal(result.status, 403);
+    assert.deepEqual(db.writes, []);
+});
+
+test("blocked group member cannot send messages", async () => {
+    const db = database();
+    const result = await call(chats, "/chat", db, "blocked", { chat_id: 10, text: "blocked" });
+    assert.equal(result.status, 403);
+    assert.deepEqual(db.writes, []);
 });
