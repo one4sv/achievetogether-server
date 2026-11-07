@@ -19,6 +19,7 @@ export default function (app, supabase) {
 
   // ====================== GET /chat/:nick ======================
   app.get("/chat/:nick", authenticateUser(supabase), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id } = req.user;
     const chatWithNick = req.params.nick;
     const limit = req.query.limit;
@@ -112,7 +113,10 @@ export default function (app, supabase) {
           .eq("user_id", id)
           .single();
 
-        chatMember = cm || chatMember;
+        if (!cm || cm.is_blocked) {
+          return res.status(403).json({ success: false, error: "Нет доступа к чату" });
+        }
+        chatMember = cm;
 
         // am_i_blocked имеет смысл только если это не self-чат
         if (chatWith.id !== id) {
@@ -213,6 +217,7 @@ export default function (app, supabase) {
 
   // ====================== GET /chat/group/:id ======================
   app.get("/chat/group/:id", authenticateUser(supabase), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id: userId } = req.user;
     const chatId = req.params.id;
     const limit = req.query.limit;
@@ -227,7 +232,7 @@ export default function (app, supabase) {
         .eq("user_id", userId)
         .single();
 
-      if (memberError || !member) {
+      if (memberError || !member || member.is_blocked) {
         return res.status(403).json({ success: false, error: "Нет доступа к чату" });
       }
 
