@@ -1,11 +1,13 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { broadcastNewMessage, broadcastPinToggle } from "../../realtime/ws.js";
+import { canAccessMessage } from "../../utils/messageAccess.js";
+import { hasServerPermission } from "../../utils/hasPermission.js";
+import { PERMS } from "../../config/permissions.js";
 
 export default function(app, supabase) {
   app.post("/pinmess", authenticateUser(supabase), async (req, res) => {
     try {
-      console.log("[pinmess] called, user:", req.user?.id);
-
+      if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
       const userId = req.user.id;
       const { message_id } = req.body;
 
@@ -21,7 +23,7 @@ export default function(app, supabase) {
       // Получаем сообщение
       const { data: message, error: msgError } = await supabase
         .from("messages")
-        .select("id, chat_id, is_pinned, is_system")
+        .select("id, chat_id, is_pinned, is_system, hidden")
         .eq("id", msgId)
         .single();
 
@@ -29,6 +31,9 @@ export default function(app, supabase) {
         return res.status(404).json({ success: false, error: "Сообщение не найдено" });
       }
 
+      if (!(await canAccessMessage(supabase, message, userId))) {
+        return res.status(403).json({ success: false, error: "Нет доступа к сообщению" });
+      }
       if (message.is_system) {
         return res.status(400).json({ success: false, error: "Системные сообщения нельзя закреплять" });
       }
@@ -44,6 +49,9 @@ export default function(app, supabase) {
 
       if (chatError || !chat) {
         return res.status(500).json({ success: false, error: "Ошибка получения данных чата" });
+      }
+      if (chat.is_group && !(await hasServerPermission(supabase, chatId, userId, PERMS.pin_messages))) {
+        return res.status(403).json({ success: false, error: "Нет прав на закрепление" });
       }
 
       // Toggle
