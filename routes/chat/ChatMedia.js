@@ -137,6 +137,7 @@ export default function (app, supabase) {
     }
 
     app.get("/media/:type/:id", authenticateUser(supabase), async (req, res) => {
+        if (!req.user?.id) return res.status(401).json({ success: false, error: "Authentication required" });
         try {
             const userId = req.user.id;
             const { type, id } = req.params;
@@ -157,14 +158,14 @@ export default function (app, supabase) {
             if (type === "group") {
                 const { data: member, error } = await supabase
                     .from("chat_members")
-                    .select("chat_id")
+                    .select("chat_id, is_blocked")
                     .eq("chat_id", id)
                     .eq("user_id", userId)
                     .maybeSingle();
 
                 if (error) throw error;
 
-                if (!member) {
+                if (!member || member.is_blocked) {
                     return res.status(403).json({ success: false, error: "Access denied" });
                 }
 
