@@ -392,26 +392,55 @@ export default function initWebSocket(supabase, server) {
             });
           }
         } else {
-          let targetSockets = clientsMap.get(data.to);
-          if (!targetSockets) {
-            // попробуем найти пользователя по nick
-            try {
-              const { data: userByNick } = await supabaseGlobal
-                .from("users")
-                .select("id")
-                .eq("nick", data.to)
-                .single();
-              if (userByNick) {
-                targetSockets = clientsMap.get(userByNick.id);
-              }
-            } catch (err) {
-              console.error("Ошибка поиска пользователя по nick для TYPING:", err);
-            }
+          // A direct typing event is private chat data, not a user-to-user broadcast.
+          // Resolve the recipient and require a shared, unblocked, non-group chat.
+          let targetId = null;
+          const { data: recipientById, error: recipientIdError } = await supabaseGlobal
+            .from("users")
+            .select("id")
+            .eq("id", String(data.to))
+            .maybeSingle();
+          if (recipientIdError) return;
+          let recipient = recipientById;
+          if (!recipient) {
+            const { data: recipientByNick, error: recipientNickError } = await supabaseGlobal
+              .from("users")
+              .select("id")
+              .eq("nick", String(data.to))
+              .maybeSingle();
+            if (recipientNickError) return;
+            recipient = recipientByNick;
           }
-          targetSockets?.forEach(s => {
-            if (s.readyState === WebSocket.OPEN) {
-              s.send(payload);
-            }
+          if (!recipient || recipient.id === userId) return;
+          targetId = recipient.id;
+
+          const { data: myChats, error: myError } = await supabaseGlobal
+            .from("chat_members")
+            .select("chat_id,is_blocked,chats!inner(is_group)")
+            .eq("user_id", userId)
+            .eq("chats.is_group", false);
+          if (myError || !myChats) return;
+          const allowedIds = myChats.filter(member => !member.is_blocked)
+            .map(member => member.chat_id);
+          if (!allowedIds.length) return;
+          const { data: theirChats, error: theirError } = await supabaseGlobal
+            .from("chat_members")
+            .select("chat_id,is_blocked,chats!inner(is_group)")
+            .eq("user_id", targetId)
+            .eq("chats.is_group", false)
+            .in("chat_id", allowedIds);
+          if (theirError || !theirChats?.some(member => !member.is_blocked)) return;
+
+          const privatePayload = JSON.stringify({
+            type: data.type,
+            to: targetId,
+            is_group: false,
+            from: userId,
+            sender_name: fromUser?.username || fromUser?.nick || "Аноним",
+            chat_id: null
+          });
+          clientsMap.get(targetId)?.forEach(s => {
+            if (s.readyState === WebSocket.OPEN) s.send(privatePayload);
           });
         }
       }

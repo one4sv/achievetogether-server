@@ -11,15 +11,28 @@ test("real websocket connections isolate chat events and reject malformed/group-
     const users = ["owner", "member", "outsider", "blocked"];
     const tickets = users.map((user_id, i) => ({ user_id, session_id: null, auth_version: 1,
         token_hash: createHash("sha256").update(String(i).repeat(43)).digest("hex") }));
-    const members = users.filter(id => id !== "outsider").map(user_id => ({
-        user_id, chat_id: 10, is_blocked: user_id === "blocked"
-    }));
+    const members = [
+        ...users.filter(id => id !== "outsider").map(user_id => ({
+            user_id, chat_id: 10, is_blocked: user_id === "blocked"
+        })),
+        { user_id: "owner", chat_id: 20, is_blocked: false },
+        { user_id: "member", chat_id: 20, is_blocked: false },
+        { user_id: "outsider", chat_id: 30, is_blocked: false },
+        { user_id: "member", chat_id: 30, is_blocked: true }
+    ];
+    const chats = [{ id: 10, is_group: true }, { id: 20, is_group: false }, { id: 30, is_group: false }];
     const db = { from(table) {
-        let filters = [], single = false, deletion = false;
+        let filters = [], single = false, deletion = false, innerPersonal = false;
         const query = {
-            select() { return query; }, update() { return query; }, gt() { return query; },
+            select(columns = "") { if (columns.includes("chats!inner")) innerPersonal = true; return query; },
+            update() { return query; }, gt() { return query; },
             delete() { deletion = true; return query; },
-            eq(key, value) { filters.push(row => row[key] === value); return query; },
+            eq(key, value) {
+                if (key === "chats.is_group") { filters.push(row => chats.find(c => c.id === row.chat_id)?.is_group === value); }
+                else filters.push(row => row[key] === value);
+                return query;
+            },
+            in(key, values) { filters.push(row => values.includes(row[key])); return query; },
             single() { single = true; return query; }, maybeSingle() { single = true; return query; },
             then(resolve, reject) {
                 const source = table === "at_ws_tickets" ? tickets : table === "chat_members" ? members :
@@ -53,6 +66,9 @@ test("real websocket connections isolate chat events and reject malformed/group-
         sockets[0].send("{broken");
         sockets[0].send("null");
         sockets[0].send(JSON.stringify({ type: "TYPING", to: 10, is_group: true, secret: "do not forward" }));
+        sockets[2].send(JSON.stringify({ type: "TYPING", to: "owner", is_group: false }));
+        sockets[3].send(JSON.stringify({ type: "TYPING", to: "owner", is_group: false }));
+        sockets[0].send(JSON.stringify({ type: "TYPING", to: "member", is_group: false }));
         await delay(80);
         assert.deepEqual(inboxes[2], []);
         assert.deepEqual(inboxes[3], []);
@@ -63,6 +79,10 @@ test("real websocket connections isolate chat events and reject malformed/group-
         assert.equal(typing.length, 1);
         assert.equal(typing[0].from, "owner");
         assert.equal(typing[0].secret, undefined);
+        const privateTyping = inboxes[1].filter(event => event.type === "TYPING" && !event.is_group);
+        assert.equal(privateTyping.length, 1);
+        assert.equal(privateTyping[0].from, "owner");
+        assert.equal(inboxes[0].filter(event => event.type === "TYPING").length, 0);
         assert.equal(sockets[0].readyState, WebSocket.OPEN);
     } finally {
         const closed = sockets.map(socket => socket.readyState === WebSocket.CLOSED ? Promise.resolve() : once(socket, "close"));
