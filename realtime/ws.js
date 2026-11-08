@@ -6,6 +6,20 @@ let clientsMap = new Map();
 let supabaseGlobal;
 let broadcastUserStatus;
 
+// Presence is private conversation metadata, never a broadcast to all signed-in users.
+export async function canSeePresence(supabase, viewerId, subjectId) {
+  if (!viewerId || !subjectId) return false;
+  if (viewerId === subjectId) return true;
+  const { data: memberships, error } = await supabase.from("chat_members")
+    .select("chat_id,is_blocked").eq("user_id", viewerId);
+  if (error || !memberships) return false;
+  const ids = memberships.filter(member => !member.is_blocked).map(member => member.chat_id);
+  if (!ids.length) return false;
+  const { data: shared, error: sharedError } = await supabase.from("chat_members")
+    .select("chat_id,is_blocked").eq("user_id", subjectId).in("chat_id", ids);
+  return !sharedError && !!shared?.some(member => !member.is_blocked);
+}
+
 export function disconnectAuthSession(sessionId) {
   for (const sockets of clientsMap.values()) sockets.forEach(ws => {
     if (ws.authSessionId === sessionId && ws.readyState === WebSocket.OPEN) ws.close(1008, "Session revoked");
@@ -320,13 +334,15 @@ export default function initWebSocket(supabase, server) {
         .select("nick")
         .eq("id", otherUserId)
         .single();
-      const payload = JSON.stringify({
-        type: "USER_STATUS",
-        userId: otherUserId,
-        nick: userRow?.nick || null,
-        isOnline: true
-      });
-      ws.send(payload);
+      if (await canSeePresence(supabase, userId, otherUserId)) {
+        const payload = JSON.stringify({
+          type: "USER_STATUS",
+          userId: otherUserId,
+          nick: userRow?.nick || null,
+          isOnline: true
+        });
+        ws.send(payload);
+      }
     }
     const aliveTimer = setInterval(async () => {
       try {
@@ -495,11 +511,11 @@ export default function initWebSocket(supabase, server) {
       nick = data?.nick || null;
     }
     const payload = JSON.stringify({ type: "USER_STATUS", userId, nick, isOnline, last_online });
-    for (const sockets of clientsMap.values()) {
+    for (const [viewerId, sockets] of clientsMap) {
+      if (!(await canSeePresence(supabaseGlobal, viewerId, userId))) continue;
       sockets.forEach(ws => {
         if (ws.readyState === WebSocket.OPEN) ws.send(payload);
-      }
-    );
+      });
     }
   }
   console.log("WebSocket initialized on /ws");

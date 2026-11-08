@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocket } from "ws";
-import initWebSocket, { broadcastReaction, broadcastMessageDeleted } from "../realtime/ws.js";
+import initWebSocket, { broadcastReaction, broadcastMessageDeleted, canSeePresence } from "../realtime/ws.js";
 
 test("real websocket connections isolate chat events and reject malformed/group-spoofed input", { timeout: 10000 }, async () => {
     const users = ["owner", "member", "outsider", "blocked"];
@@ -91,4 +91,29 @@ test("real websocket connections isolate chat events and reject malformed/group-
         await new Promise(resolve => wss.close(resolve));
         await new Promise(resolve => server.close(resolve));
     }
+});
+
+test("presence is visible only to members of a shared unblocked chat", async () => {
+    const memberships = [
+        { user_id: "alice", chat_id: 1, is_blocked: false },
+        { user_id: "bob", chat_id: 1, is_blocked: false },
+        { user_id: "charlie", chat_id: 2, is_blocked: false },
+        { user_id: "bob", chat_id: 2, is_blocked: true }
+    ];
+    const supabase = { from: () => {
+        let filters = [];
+        const query = {
+            select() { return query; },
+            eq(key,value) { filters.push(row => row[key] === value); return query; },
+            in(key,values) { filters.push(row => values.includes(row[key])); return query; },
+            then(resolve,reject) {
+                return Promise.resolve({ data: memberships.filter(row => filters.every(filter => filter(row))),error:null }).then(resolve,reject);
+            }
+        };
+        return query;
+    } };
+    assert.equal(await canSeePresence(supabase, "alice", "bob"), true);
+    assert.equal(await canSeePresence(supabase, "alice", "charlie"), false);
+    assert.equal(await canSeePresence(supabase, "charlie", "bob"), false);
+    assert.equal(await canSeePresence(supabase, "alice", "alice"), true);
 });
