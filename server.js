@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createServer } from "node:http";
 import createApp from "./app.js";
 import initWebSocket from "./realtime/ws.js";
+import { startHabitReminderWorker } from "./services/habitReminderWorker.js";
 
 process.stdout.setDefaultEncoding("utf8");
 process.stderr.setDefaultEncoding("utf8");
@@ -15,6 +16,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const app = createApp(supabase);
 const server = createServer(app);
 initWebSocket(supabase, server);
+startHabitReminderWorker(supabase);
 
 const port = process.env.PORT || 3001;
 server.listen(port, () => console.log(`AT server running on port ${port}`));
