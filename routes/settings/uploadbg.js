@@ -1,6 +1,7 @@
 import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { authenticateUser } from "../../middleware/token.js";
+import { originalAssetUrl } from "../system/private-assets.js";
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -70,7 +71,7 @@ export default function (app, supabase) {
     app.post("/backgrounds/delete", auth, async (req, res) => {
         const userId = req.user?.id;
         if (!userId) return res.status(401).json({ success: false, error: "Не авторизован" });
-        const url = req.body?.url;
+        const url = originalAssetUrl(req.body?.url, supabase);
         if (typeof url !== "string" || url.length > 2048) {
             return res.status(400).json({ success: false, error: "Некорректный фон" });
         }

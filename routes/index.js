@@ -56,9 +56,11 @@ import habit_statsRoutes from "./habits/habit_stats.js";
 import LinkPreviewRoutes from "./system/link-preview.js";
 import ChatMediaRoutes from "./chat/ChatMedia.js";
 import feedbackRoutes from "./system/feedback.js";
+import privateAssetRoutes from "./system/private-assets.js";
 
 export default function registerAllRoutes(app, supabase) {
-    registerRoutes(app, supabase);
+    privateAssetRoutes(app, supabase);
+
     authRoutes(app, supabase);
     accountSecurityRoutes(app, supabase);
     passwordRoutes(app, supabase);

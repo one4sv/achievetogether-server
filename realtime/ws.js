@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createHash } from "node:crypto";
 import { deliverMessagePush } from "../services/push.js";
+import { rewritePrivateAssets } from "../routes/system/private-assets.js";
 let clientsMap = new Map();
 let supabaseGlobal;
 let broadcastUserStatus;
@@ -79,7 +80,7 @@ export async function broadcastNewMessage(chat_id, message) {
               type: "NEW_MESSAGE",
               chat_id: chat_id,
               chat_name: chat?.name || undefined,
-              message,
+              message: rewritePrivateAssets(message),
               nick: senderData?.nick || null,
               username: senderData?.username || null,
               is_note: allNote && newMessNote && chatNote,
@@ -125,7 +126,7 @@ export function broadcastMessageEdited(chat_id, message, eventType = "MESSAGE_ED
             s.send(JSON.stringify({
               type: eventType,
               chatId: chat_id,
-              message
+              message: rewritePrivateAssets(message)
             }));
           }
         });

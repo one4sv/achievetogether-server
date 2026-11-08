@@ -7,6 +7,7 @@ import { BotInit } from "../../services/bot.js";
 import resolveOriginalRedirect from "../../utils/resolveRedirect.js";
 import { getChatMessages } from "../../utils/getChatMessages.js";
 import { canAccessMessage } from "../../utils/messageAccess.js";
+import { originalAssetUrl } from "../system/private-assets.js";
 import { hasServerPermission } from "../../utils/hasPermission.js";
 import { PERMS } from "../../config/permissions.js";
 
@@ -741,7 +742,7 @@ export default function (app, supabase) {
       const { data: existingFiles, error: existingError } = await supabase
         .from("message_files").select("id, file_url").eq("message_id", messageId);
       if (existingError) throw existingError;
-      const kept = new Set(keptUrls);
+      const kept = new Set(keptUrls.map(url => originalAssetUrl(url, supabase)));
       const deleteIds = (existingFiles || []).filter(file => !kept.has(file.file_url))
         .map(file => file.id);
       if (deleteIds.length) {
