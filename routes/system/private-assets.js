@@ -41,9 +41,9 @@ export function rewritePrivateAssets(payload) {
 }
 
 function validPath(path) {
-    return typeof path === "string" && path.length > 0 && path.length <= 300 &&
+    return typeof path === "string" && path.length > 0 && path.length <= 800 &&
         !path.split("/").some(segment => !segment || segment === "." || segment === "..") &&
-        /^[a-zA-Z0-9_./-]+$/.test(path);
+        !/[\\\u0000-\u001f\u007f?#]/.test(path);
 }
 
 export async function canDownloadMedia(supabase, path, userId) {
@@ -74,8 +74,9 @@ export async function canDownloadBackground(supabase, path, userId) {
     const { data, error } = await supabase.from("settings")
         .select("bg_gallery").eq("user_id", userId).maybeSingle();
     if (error) throw error;
-    return (Array.isArray(data?.bg_gallery) && data.bg_gallery.some(item => item?.path === path))
-        ? { file_type: "image/*", file_name: "background" } : null;
+    const saved = Array.isArray(data?.bg_gallery) && data.bg_gallery.some(item => item?.path === path);
+    const ownedLegacy = path.startsWith(`user_${userId}_`);
+    return (saved || ownedLegacy) ? { file_type: "image/*", file_name: "background" } : null;
 }
 
 export default function privateAssetRoutes(app, supabase) {

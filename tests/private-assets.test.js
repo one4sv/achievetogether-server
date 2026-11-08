@@ -15,6 +15,10 @@ test("asset URL rewrite only applies to own Supabase media and bgs", () => {
         const mocked = { storage: { from: () => ({ getPublicUrl: path => ({ data: { publicUrl: "https://example.supabase.co/storage/v1/object/public/media/" + path } }) }) } };
         assert.equal(originalAssetUrl("/api/private-asset/media/a/file.webp", mocked),
             "https://example.supabase.co/storage/v1/object/public/media/a/file.webp");
+        assert.equal(originalAssetUrl("/api/private-asset/media/a/my%20photo.webp", mocked),
+            "https://example.supabase.co/storage/v1/object/public/media/a/my photo.webp");
+        assert.equal(originalAssetUrl("/api/private-asset/media/a/../secret.webp", mocked),
+            "/api/private-asset/media/a/../secret.webp");
         assert.deepEqual(rewritePrivateAssets({ files: [{ url: "https://example.supabase.co/storage/v1/object/public/media/a/file.webp" }] }),
             { files: [{ url: "/api/private-asset/media/a/file.webp" }] });
     } finally {
@@ -66,4 +70,6 @@ test("forwarded media is accessible through a visible authorized copy only", asy
 test("custom wallpaper download is only allowed for its owner", async () => {
     assert.ok(await canDownloadBackground(fakeSupabase(), "user_alice_bg_1.webp", "alice"));
     assert.equal(await canDownloadBackground(fakeSupabase(), "user_bob_bg_1.webp", "alice"), null);
+    assert.ok(await canDownloadBackground(fakeSupabase(), "user_alice_legacy.webp", "alice"));
+    assert.equal(await canDownloadBackground(fakeSupabase(), "user_bob_legacy.webp", "alice"), null);
 });
