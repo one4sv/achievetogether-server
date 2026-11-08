@@ -1,5 +1,6 @@
 import registerRoutes from "./auth/register.js";
 import authRoutes from "./auth/auth.js";
+import accountSecurityRoutes from "./auth/account-security.js";
 import passwordRoutes from "./auth/password.js";
 import sessionRoutes from "./auth/sessions.js";
 import wsTicketRoutes from "./auth/ws-ticket.js";
@@ -58,6 +59,7 @@ import feedbackRoutes from "./system/feedback.js";
 export default function registerAllRoutes(app, supabase) {
     registerRoutes(app, supabase);
     authRoutes(app, supabase);
+    accountSecurityRoutes(app, supabase);
     passwordRoutes(app, supabase);
     sessionRoutes(app, supabase);
     wsTicketRoutes(app, supabase);
