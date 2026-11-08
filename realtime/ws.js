@@ -395,18 +395,22 @@ export default function initWebSocket(supabase, server) {
           // A direct typing event is private chat data, not a user-to-user broadcast.
           // Resolve the recipient and require a shared, unblocked, non-group chat.
           let targetId = null;
-          const { data: recipientById, error: recipientIdError } = await supabaseGlobal
-            .from("users")
-            .select("id")
-            .eq("id", String(data.to))
-            .maybeSingle();
-          if (recipientIdError) return;
-          let recipient = recipientById;
+          const target = String(data.to);
+          let recipient = null;
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target)) {
+            const { data: recipientById, error: recipientIdError } = await supabaseGlobal
+              .from("users")
+              .select("id")
+              .eq("id", target)
+              .maybeSingle();
+            if (recipientIdError) return;
+            recipient = recipientById;
+          }
           if (!recipient) {
             const { data: recipientByNick, error: recipientNickError } = await supabaseGlobal
               .from("users")
               .select("id")
-              .eq("nick", String(data.to))
+              .eq("nick", target)
               .maybeSingle();
             if (recipientNickError) return;
             recipient = recipientByNick;
