@@ -120,7 +120,7 @@ export default function (app, supabase) {
         // Находим пользователя
         const { data: user, error: userError } = await supabase
           .from("users")
-          .select("id")
+          .select("id,deletion_requested_at")
           .eq("mail", authRow.mail)
           .single();
 
@@ -129,6 +129,10 @@ export default function (app, supabase) {
             success: false,
             error: "Пользователь не найден",
           });
+        }
+
+        if (user.deletion_requested_at) {
+          return res.status(423).json({ success: false, code: "DELETION_PENDING", email: authRow.mail, deadline: new Date(new Date(user.deletion_requested_at).getTime() + 30 * 86400000).toISOString() });
         }
 
         // JWT + cookie
