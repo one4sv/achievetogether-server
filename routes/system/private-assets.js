@@ -46,7 +46,7 @@ function validPath(path) {
         /^[a-zA-Z0-9_./-]+$/.test(path);
 }
 
-async function canDownloadMedia(supabase, path, userId) {
+export async function canDownloadMedia(supabase, path, userId) {
     const publicUrl = supabase.storage.from("media").getPublicUrl(path).data.publicUrl;
     const { data: files, error } = await supabase.from("message_files")
         .select("id,message_id,file_type,file_name").eq("file_url", publicUrl).limit(30);
@@ -70,7 +70,7 @@ async function canDownloadMedia(supabase, path, userId) {
     return null;
 }
 
-async function canDownloadBackground(supabase, path, userId) {
+export async function canDownloadBackground(supabase, path, userId) {
     const { data, error } = await supabase.from("settings")
         .select("bg_gallery").eq("user_id", userId).maybeSingle();
     if (error) throw error;
