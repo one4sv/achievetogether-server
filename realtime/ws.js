@@ -130,10 +130,11 @@ export async function broadcastHabitCommentUpdated(supabase, habitId, date) {
 export function broadcastMessageEdited(chat_id, message, eventType = "MESSAGE_EDITED") {
   supabaseGlobal
     .from("chat_members")
-    .select("user_id")
+    .select("user_id,is_blocked")
     .eq("chat_id", chat_id)
     .then(({ data: members }) => {
       members?.forEach(member => {
+        if (member.is_blocked) return;
         const sockets = clientsMap.get(member.user_id);
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
@@ -151,10 +152,11 @@ export function broadcastMessageEdited(chat_id, message, eventType = "MESSAGE_ED
 export function broadcastMessageRead(chat_id, messageId, userId) {
   supabaseGlobal
     .from("chat_members")
-    .select("user_id")
+    .select("user_id,is_blocked")
     .eq("chat_id", chat_id)
     .then(({ data: members }) => {
       members?.forEach(member => {
+        if (member.is_blocked) return;
         const sockets = clientsMap.get(member.user_id);
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
@@ -216,10 +218,11 @@ export async function broadcastGroupUpdated(chat_id) {
   try {
     const { data: members } = await supabaseGlobal
       .from("chat_members")
-      .select("user_id")
+      .select("user_id,is_blocked")
       .eq("chat_id", chat_id);
     if (!members || members.length === 0) return;
     for (const member of members) {
+      if (member.is_blocked) continue;
       const sockets = clientsMap.get(member.user_id);
       sockets?.forEach(s => {
         if (s.readyState === WebSocket.OPEN) {
@@ -238,10 +241,11 @@ export async function broadcastPinToggle(chat_id, message_id, is_pinned) {
   try {
     const { data: members } = await supabaseGlobal
       .from("chat_members")
-      .select("user_id")
+      .select("user_id,is_blocked")
       .eq("chat_id", chat_id);
     if (!members || members.length === 0) return;
     for (const member of members) {
+      if (member.is_blocked) continue;
       const sockets = clientsMap.get(member.user_id);
       sockets?.forEach(s => {
         if (s.readyState === WebSocket.OPEN) {

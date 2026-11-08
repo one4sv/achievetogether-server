@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocket } from "ws";
-import initWebSocket, { broadcastReaction, broadcastMessageDeleted, canSeePresence } from "../realtime/ws.js";
+import initWebSocket, { broadcastReaction, broadcastMessageDeleted, broadcastMessageEdited, broadcastMessageRead, broadcastGroupUpdated, broadcastPinToggle, canSeePresence } from "../realtime/ws.js";
 
 test("real websocket connections isolate chat events and reject malformed/group-spoofed input", { timeout: 10000 }, async () => {
     const users = ["owner", "member", "outsider", "blocked"];
@@ -62,6 +62,10 @@ test("real websocket connections isolate chat events and reject malformed/group-
         inboxes.forEach(inbox => inbox.splice(0));
         await broadcastReaction(10, { messageId: 1, user_id: "owner", reaction: "👍", removed: false });
         await broadcastMessageDeleted(10, 1, "member");
+        await broadcastMessageEdited(10, { id: 1, content: "changed" });
+        await broadcastMessageRead(10, 1, "owner");
+        await broadcastGroupUpdated(10);
+        await broadcastPinToggle(10, 1, true);
         sockets[2].send(JSON.stringify({ type: "TYPING", to: 10, is_group: true }));
         sockets[0].send("{broken");
         sockets[0].send("null");
@@ -72,6 +76,10 @@ test("real websocket connections isolate chat events and reject malformed/group-
         await delay(80);
         assert.deepEqual(inboxes[2], []);
         assert.deepEqual(inboxes[3], []);
+        for (const kind of ["MESSAGE_EDITED", "MESSAGE_READ", "GROUP_UPDATED", "MESSAGE_PIN_TOGGLED"]) {
+            assert.equal(inboxes[0].filter(event => event.type === kind).length, 1);
+            assert.equal(inboxes[1].filter(event => event.type === kind).length, 1);
+        }
         assert.equal(inboxes[0].filter(event => event.type === "MESSAGE_REACTION").length, 1);
         assert.equal(inboxes[0].filter(event => event.type === "MESSAGE_DELETED").length, 0);
         assert.equal(inboxes[1].filter(event => event.type === "MESSAGE_DELETED").length, 1);
