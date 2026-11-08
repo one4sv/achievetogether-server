@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { authenticateUser } from "../../middleware/token.js";
 import { sendMail } from "../../services/sendmail.js";
 
-const kinds = new Set(["bug", "idea", "other", "report"]);
+const kinds = new Set(["bug", "idea", "other", "complaint", "report"]);
 const targets = new Set(["account", "post", "message", "comment", "activity"]);
 const reasons = new Set(["spam", "harassment", "hate", "violence", "sexual", "privacy", "fraud", "other"]);
 const limits = new Map();
@@ -29,7 +29,7 @@ function allowRequest(key, authenticated) {
 }
 
 function makeEmail({ id, kind, reason, title, details, target, sender, page, created }) {
-    const label = { bug: "Ошибка", idea: "Предложение", other: "Обратная связь", report: "Жалоба" }[kind];
+    const label = { bug: "Ошибка", idea: "Предложение", other: "Обратная связь", complaint: "Жалоба", report: "Жалоба" }[kind];
     const accent = kind === "report" ? "#ee777e" : "#f69c50";
     const item = (name, value) => `<tr><td style="padding:12px 16px;color:#9ca0af;border-bottom:1px solid #292a34;vertical-align:top;width:140px;">${escapeHTML(name)}</td><td style="padding:12px 16px;color:#f1f2f7;border-bottom:1px solid #292a34;word-break:break-word;">${escapeHTML(value || "—")}</td></tr>`;
     return `<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"></head>
@@ -61,7 +61,8 @@ export default function feedbackRoutes(app, supabase) {
         const isReport = kind === "report";
         if (!kinds.has(kind) || !accept(title, 4, 140) || !accept(details, 12, 3000) ||
             (isReport && (!req.user?.id || !targets.has(targetType) || !accept(String(targetId ?? ""), 1, 120) || !reasons.has(reason))) ||
-            (!isReport && (targetType || targetId || reason)) ||
+            (!isReport && (targetType || targetId || (kind !== "complaint" && reason))) ||
+            (kind === "complaint" && !reasons.has(reason)) ||
             (contactEmail != null && contactEmail !== "" &&
                 (typeof contactEmail !== "string" || contactEmail.length > 140 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)))) {
             return res.status(400).json({ success: false, error: "Invalid feedback" });
@@ -82,8 +83,8 @@ export default function feedbackRoutes(app, supabase) {
         try {
             await sendMail(
                 process.env.SUPPORT_EMAIL || "kutenko18@gmail.com",
-                `[AT] ${isReport ? "Жалоба" : "Обратная связь"} #${id}`,
-                makeEmail({ id, kind, reason: isReport ? reason : "", title: title.trim(), details: details.trim(), target, sender, page, created: new Date().toISOString() })
+                `[AT] ${isReport || kind === "complaint" ? "Жалоба" : "Обратная связь"} #${id}`,
+                makeEmail({ id, kind, reason: (isReport || kind === "complaint") ? reason : "", title: title.trim(), details: details.trim(), target, sender, page, created: new Date().toISOString() })
             );
             res.json({ success: true, id });
         } catch (error) {
