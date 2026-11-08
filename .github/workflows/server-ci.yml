@@ -1,0 +1,37 @@
+name: Server checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check server module syntax
+        run: |
+          node --check server.js
+          node --check routes/index.js
+          node --check routes/auth/auth.js
+          node --check routes/auth/confirm.js
+          node --check routes/auth/askauth.js
+          node --check routes/auth/account-security.js
+          node --check routes/settings/habit-reminders.js
+          node --check routes/chat/chat.js
+          node --check services/habitReminderWorker.js
+          node --check services/accountStorageCleanup.js
+      - name: Run Node server tests
+        run: npm test
