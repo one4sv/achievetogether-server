@@ -81,16 +81,39 @@ export default function feedbackRoutes(app, supabase) {
             const { data } = await supabase.from("users").select("nick,mail").eq("id", req.user.id).maybeSingle();
             if (data) sender = (data.nick || sender) + " · " + (data.mail || "");
         } else if (contactEmail) sender += " · " + contactEmail;
+        const recipient = process.env.SUPPORT_EMAIL || "kutenko18@gmail.com";
+        const subject = `[AT] ${isReport || kind === "complaint" ? "Жалоба" : "Обратная связь"} #${id}`;
+        const html = makeEmail({
+            id, kind, reason: (isReport || kind === "complaint") ? reason : "",
+            title: title.trim(), details: details.trim(), target, sender, page,
+            created: new Date().toISOString()
+        });
         try {
-            await sendMail(
-                process.env.SUPPORT_EMAIL || "kutenko18@gmail.com",
-                `[AT] ${isReport || kind === "complaint" ? "Жалоба" : "Обратная связь"} #${id}`,
-                makeEmail({ id, kind, reason: (isReport || kind === "complaint") ? reason : "", title: title.trim(), details: details.trim(), target, sender, page, created: new Date().toISOString() })
-            );
-            res.json({ success: true, id });
-        } catch (error) {
-            console.error("Feedback delivery failed:", error.message);
-            res.status(503).json({ success: false, error: "Feedback delivery unavailable" });
+            const { error: queueError } = await supabase.from("at_feedback_outbox").insert({
+                id, user_id: req.user?.id || null, recipient, subject, html,
+                status: "processing", attempts: 1, claimed_at: new Date().toISOString()
+            });
+            if (queueError) throw queueError;
+        } catch {
+            return res.status(503).json({ success: false, error: "Feedback cannot be accepted" });
+        }
+
+        try {
+            await sendMail(recipient, subject, html);
+            const { error: completionError } = await supabase.from("at_feedback_outbox")
+                .update({ status: "sent", delivered_at: new Date().toISOString(), last_error_code: null })
+                .eq("id", id).eq("status", "processing");
+            if (completionError) console.error("[feedback] delivery receipt persistence failed");
+            return res.json({ success: true, id, queued: false });
+        } catch {
+            const { error: retryError } = await supabase.from("at_feedback_outbox").update({
+                status: "pending",
+                next_attempt_at: new Date(Date.now() + 60000).toISOString(),
+                claimed_at: null,
+                last_error_code: "provider_unavailable"
+            }).eq("id", id).eq("status", "processing");
+            if (retryError) console.error("[feedback] retry queue persistence failed");
+            return res.json({ success: true, id, queued: true });
         }
     });
 }

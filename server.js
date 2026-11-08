@@ -5,6 +5,7 @@ import createApp from "./app.js";
 import initWebSocket from "./realtime/ws.js";
 import { startHabitReminderWorker } from "./services/habitReminderWorker.js";
 import { startAccountStorageCleanup } from "./services/accountStorageCleanup.js";
+import { startFeedbackOutboxWorker } from "./services/feedbackOutbox.js";
 
 process.stdout.setDefaultEncoding("utf8");
 process.stderr.setDefaultEncoding("utf8");
@@ -19,6 +20,7 @@ const server = createServer(app);
 initWebSocket(supabase, server);
 startHabitReminderWorker(supabase);
 startAccountStorageCleanup(supabase);
+startFeedbackOutboxWorker(supabase);
 
 const port = process.env.PORT || 3001;
 server.listen(port, () => console.log(`AT server running on port ${port}`));
