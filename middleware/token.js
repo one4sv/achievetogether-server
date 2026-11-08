@@ -12,8 +12,8 @@ export function authenticateUser(supabase) {
             if (typeof decoded !== "object" || !decoded.id) return next();
 
             const { data: user, error: userError } = await supabase.from("users")
-                .select("auth_version").eq("id", decoded.id).maybeSingle();
-            if (userError || !user) return next();
+                .select("auth_version,deletion_requested_at").eq("id", decoded.id).maybeSingle();
+            if (userError || !user || user.deletion_requested_at) return next();
             const currentVersion = user.auth_version || 1;
             if ((decoded.v || 1) !== currentVersion) return next();
 
