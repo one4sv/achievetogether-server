@@ -685,7 +685,18 @@ export default function (app, supabase) {
     const messageId = parseInt(req.params.id);
     const { text, answer_id, kept_urls } = req.body;
     const newFiles = req.files || [];
-    const keptUrls = kept_urls ? JSON.parse(kept_urls) : [];
+    let keptUrls;
+    try {
+      keptUrls = kept_urls ? JSON.parse(kept_urls) : [];
+    } catch {
+      return res.status(400).json({ success: false, error: "Некорректный список файлов" });
+    }
+    if (!Number.isSafeInteger(messageId) || messageId <= 0 ||
+        (text !== undefined && typeof text !== "string") ||
+        !Array.isArray(keptUrls) || keptUrls.length > 20 ||
+        keptUrls.some(url => typeof url !== "string" || url.length > 2048)) {
+      return res.status(400).json({ success: false, error: "Некорректные параметры" });
+    }
 
     if ((!text || !text.trim()) && newFiles.length === 0 && keptUrls.length === 0) {
       return res.status(400).json({ success: false, error: "Сообщение пустое" });
@@ -708,19 +719,35 @@ export default function (app, supabase) {
 
       const updates = { edited: true };
       if (text !== undefined) updates.content = text;
-      if (answer_id) updates.answer_id = answer_id;
+      if (answer_id !== undefined && answer_id !== "") {
+        const replyId = Number(answer_id);
+        if (!Number.isSafeInteger(replyId) || replyId <= 0) {
+          return res.status(400).json({ success: false, error: "Некорректное сообщение для ответа" });
+        }
+        const { data: reply, error: replyError } = await supabase.from("messages")
+          .select("id, chat_id, hidden")
+          .eq("id", replyId).eq("chat_id", message.chat_id).maybeSingle();
+        if (replyError || !reply || !(await canAccessMessage(supabase, reply, userId))) {
+          return res.status(403).json({ success: false, error: "Нет доступа к сообщению для ответа" });
+        }
+        updates.answer_id = replyId;
+      }
 
-      await supabase.from("messages").update(updates).eq("id", messageId);
+      const { error: updateError } = await supabase.from("messages")
+        .update(updates).eq("id", messageId);
+      if (updateError) throw updateError;
 
-      // Обработка файлов
-      if (keptUrls.length > 0) {
-        await supabase
-          .from("message_files")
-          .delete()
-          .eq("message_id", messageId)
-          .not("file_url", "in", `(${keptUrls.join(",")})`);
-      } else {
-        await supabase.from("message_files").delete().eq("message_id", messageId);
+      // Delete attachments by database IDs, never by an untrusted PostgREST filter.
+      const { data: existingFiles, error: existingError } = await supabase
+        .from("message_files").select("id, file_url").eq("message_id", messageId);
+      if (existingError) throw existingError;
+      const kept = new Set(keptUrls);
+      const deleteIds = (existingFiles || []).filter(file => !kept.has(file.file_url))
+        .map(file => file.id);
+      if (deleteIds.length) {
+        const { error: deletionError } = await supabase.from("message_files")
+          .delete().eq("message_id", messageId).in("id", deleteIds);
+        if (deletionError) throw deletionError;
       }
 
       let newFilesData = [];
