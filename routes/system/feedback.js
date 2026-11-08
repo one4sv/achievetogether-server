@@ -14,7 +14,7 @@ const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({
 const accept = (text, min, max) => typeof text === "string" &&
     text.trim().length >= min && text.trim().length <= max;
 
-const cleanUrl = value => {
+export const cleanUrl = value => {
     if (typeof value !== "string" || value.length > 500 || !value.startsWith("/") || value.startsWith("//")) return null;
     return value.split("#")[0].split("?")[0];
 };
@@ -28,9 +28,10 @@ function allowRequest(key, authenticated) {
     return true;
 }
 
-function makeEmail({ id, kind, reason, title, details, target, sender, page, created }) {
+export function makeEmail({ id, kind, reason, title, details, target, sender, page, created }) {
     const label = { bug: "Ошибка", idea: "Предложение", other: "Обратная связь", complaint: "Жалоба", report: "Жалоба" }[kind];
-    const accent = kind === "report" ? "#ee777e" : "#f69c50";
+    const accent = kind === "report" || kind === "complaint" ? "#ee777e" : "#f69c50";
+    const reasonNames = { spam: "Спам", harassment: "Оскорбления и травля", hate: "Ненависть", violence: "Насилие или угрозы", sexual: "Неприемлемый контент", privacy: "Нарушение приватности", fraud: "Мошенничество", other: "Другое" };
     const item = (name, value) => `<tr><td style="padding:12px 16px;color:#9ca0af;border-bottom:1px solid #292a34;vertical-align:top;width:140px;">${escapeHTML(name)}</td><td style="padding:12px 16px;color:#f1f2f7;border-bottom:1px solid #292a34;word-break:break-word;">${escapeHTML(value || "—")}</td></tr>`;
     return `<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"></head>
 <body style="margin:0;padding:32px 14px;background:#101116;font-family:Arial,sans-serif;color:#f1f2f7">
@@ -42,7 +43,7 @@ function makeEmail({ id, kind, reason, title, details, target, sender, page, cre
 </div>
 <div style="padding:24px 18px">
 <div style="font-size:21px;margin:0 0 14px;color:#fff">${escapeHTML(title)}</div>
-<table style="width:100%;border-collapse:collapse;font-size:14px">${item("Тип",label)}${item("Причина",reason)}${item("Объект",target)}${item("Автор",sender)}${item("Страница",page)}${item("Дата",created)}</table>
+<table style="width:100%;border-collapse:collapse;font-size:14px">${item("Тип",label)}${item("Причина",reasonNames[reason] || reason)}${item("Объект",target)}${item("Автор",sender)}${item("Страница",page)}${item("Дата",created)}</table>
 <div style="margin-top:20px;border-radius:16px;padding:18px;background:#25262f;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55">${escapeHTML(details)}</div>
 </div>
 <div style="padding:16px 24px;border-top:1px solid #373942;color:#9699a6;font-size:12px">Сообщение отправлено из AT. Личные сообщения и файлы не прикладываются автоматически. Проверяйте права доступа перед открытием объекта.</div>
@@ -60,7 +61,7 @@ export default function feedbackRoutes(app, supabase) {
         const { kind, targetType, targetId, reason, title, details, contactEmail } = body;
         const isReport = kind === "report";
         if (!kinds.has(kind) || !accept(title, 4, 140) || !accept(details, 12, 3000) ||
-            (isReport && (!req.user?.id || !targets.has(targetType) || !accept(String(targetId ?? ""), 1, 120) || !reasons.has(reason))) ||
+            (isReport && (!req.user?.id || !targets.has(targetType) || typeof targetId !== "string" || !/^[A-Za-z0-9_:-]{1,120}$/.test(targetId) || !reasons.has(reason))) ||
             (!isReport && (targetType || targetId || (kind !== "complaint" && reason))) ||
             (kind === "complaint" && !reasons.has(reason)) ||
             (contactEmail != null && contactEmail !== "" &&
