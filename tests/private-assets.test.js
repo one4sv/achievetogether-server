@@ -25,7 +25,7 @@ test("asset URL rewrite only applies to own Supabase media and bgs", () => {
 
 function fakeSupabase({ blocked = false, hidden = false, forwarded = false, hasMembership = true } = {}) {
     const originals = [{ id: 12, chat_id: "private-a", hidden: hidden ? ["alice"] : [] }];
-    const forwards = forwarded ? [{ id: 13, chat_id: "private-b", hidden: [] }] : [];
+    const forwards = forwarded ? [{ id: 13, chat_id: "private-b", hidden: [], redirected_id: 12 }] : [];
     const members = hasMembership ? [
         { chat_id: forwarded ? "private-b" : "private-a", user_id: "alice", is_blocked: blocked }
     ] : [];
