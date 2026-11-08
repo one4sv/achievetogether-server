@@ -47,11 +47,14 @@ async function deliverJob(supabase, job) {
             return await completeJob(supabase, job, "skipped", "no_active_subscriptions");
         }
 
+        const common = job.reminder_code === "common";
         const payload = {
             title: "AchieveTogether",
-            body: "Напоминание об активности / Activity reminder: " + String(habit.name).slice(0, 90),
-            url: "/habit/" + encodeURIComponent(String(habit.id)),
-            tag: "at-reminder-" + job.habit_id + "-" + job.reminder_code
+            body: common ? "Время отметить активности на сегодня / Time for today's activities" :
+                "Напоминание об активности / Activity reminder: " + String(habit.name).slice(0, 90),
+            url: common ? "/habit" : "/habit/" + encodeURIComponent(String(habit.id)),
+            tag: common ? "at-reminder-common-" + job.common_day :
+                "at-reminder-" + job.habit_id + "-" + job.reminder_code
         };
         const attempts = await Promise.allSettled(validSubscriptions.map(async subscription => {
             const result = await sendWebPush({
