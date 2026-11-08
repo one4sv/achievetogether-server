@@ -53,6 +53,7 @@ import markplanRoutes from "./habits/markplan.js";
 import habit_statsRoutes from "./habits/habit_stats.js";
 import LinkPreviewRoutes from "./system/link-preview.js";
 import ChatMediaRoutes from "./chat/ChatMedia.js";
+import feedbackRoutes from "./system/feedback.js";
 
 export default function registerAllRoutes(app, supabase) {
     registerRoutes(app, supabase);
@@ -110,4 +111,5 @@ export default function registerAllRoutes(app, supabase) {
     ChatMediaRoutes(app, supabase);
     logoutRoutes(app, supabase);
     LinkPreviewRoutes(app)
+    feedbackRoutes(app, supabase);
 }
