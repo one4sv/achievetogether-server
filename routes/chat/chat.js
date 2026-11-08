@@ -29,7 +29,7 @@ export default function (app, supabase) {
     try {
       const { data: chatWith, error: userError } = await supabase
         .from("users")
-        .select("id, username, nick, avatar_url, last_online")
+        .select("id, username, nick, avatar_url, last_online, deletion_requested_at")
         .eq("nick", chatWithNick)
         .single();
 
@@ -202,6 +202,7 @@ export default function (app, supabase) {
           username: chatWith.username,
           avatar_url: chatWith.avatar_url,
           last_online: chatWith.last_online,
+          deletion_pending: Boolean(chatWith.deletion_requested_at),
           note: chatMember.note,
           is_blocked: chatMember.is_blocked,
           pinned: chatMember.pinned,
@@ -364,12 +365,16 @@ export default function (app, supabase) {
       else if (receiver_nick) {
         const { data: receiverUser, error: receiverError } = await supabase
           .from("users")
-          .select("id")
+          .select("id,deletion_requested_at")
           .eq("nick", receiver_nick)
           .single();
 
         if (receiverError || !receiverUser) {
           return res.status(404).json({ success: false, error: "Пользователь не найден" });
+        }
+
+        if (receiverUser.deletion_requested_at) {
+          return res.status(403).json({ success: false, error: "Получатель ожидает удаления аккаунта" });
         }
 
         const receiver_id = receiverUser.id;
@@ -464,6 +469,13 @@ export default function (app, supabase) {
         if (!participants?.some(participant => participant.user_id === senderId) ||
             participants.some(participant => participant.is_blocked)) {
           return res.status(403).json({ success: false, error: "Чат заблокирован" });
+        }
+        const recipients = participants.map(participant => participant.user_id).filter(id => id !== senderId);
+        if (recipients.length) {
+          const { data: pendingUsers, error: pendingError } = await supabase.from("users")
+            .select("id").in("id", recipients).not("deletion_requested_at", "is", null);
+          if (pendingError) throw pendingError;
+          if (pendingUsers?.length) return res.status(403).json({ success: false, error: "Получатель ожидает удаления аккаунта" });
         }
       }
 
