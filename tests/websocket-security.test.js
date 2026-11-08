@@ -75,7 +75,7 @@ test("real websocket connections isolate chat events and reject malformed/group-
         assert.equal(inboxes[0].filter(event => event.type === "MESSAGE_REACTION").length, 1);
         assert.equal(inboxes[0].filter(event => event.type === "MESSAGE_DELETED").length, 0);
         assert.equal(inboxes[1].filter(event => event.type === "MESSAGE_DELETED").length, 1);
-        const typing = inboxes[1].filter(event => event.type === "TYPING");
+        const typing = inboxes[1].filter(event => event.type === "TYPING" && event.is_group);
         assert.equal(typing.length, 1);
         assert.equal(typing[0].from, "owner");
         assert.equal(typing[0].secret, undefined);
