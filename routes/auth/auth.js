@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import { randomUUID } from "crypto";
 import { sendMail } from "../../services/sendmail.js";
 import dotenv from "dotenv";
-import { randomInt } from "node:crypto";
+import { randomInt, createHmac } from "node:crypto";
 import { issueSession } from "../../utils/authSession.js";
 import { getMailTemplate } from "../../utils/mailTamlate.js";
 dotenv.config();
@@ -54,9 +54,17 @@ export default function(app, supabase) {
         const createdAt = new Date().toISOString(); // Добавлено: created_at в UTC для timestamptz
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 10 минут
 
+        const { error: invalidateError } = await supabase.from("auth_tokens").delete().eq("mail", user.mail);
+        if (invalidateError) throw invalidateError;
         const { error: insertTokenError } = await supabase
           .from("auth_tokens")
-          .insert([{ mail: user.mail, code, created_at: createdAt, expires_at: expiresAt }]); // Добавлено created_at
+          .insert([{
+            mail: user.mail,
+            code: createHmac("sha256", process.env.JWT_SECRET).update(code).digest("hex"),
+            attempts: 0,
+            created_at: createdAt,
+            expires_at: expiresAt
+          }]); // Добавлено created_at
 
         if (insertTokenError) {
           console.error("Ошибка сохранения токена:", insertTokenError);
