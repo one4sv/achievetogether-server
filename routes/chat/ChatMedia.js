@@ -58,11 +58,12 @@ export default function (app, supabase) {
         }));
     }
 
-    async function getRedirectedMedia(supabase, chatId, category, beforeId, limit) {
+    async function getRedirectedMedia(supabase, chatId, userId, category, beforeId, limit) {
         let query = supabase
             .from("messages")
             .select("id, redirected_id, created_at, sender_id")
             .eq("chat_id", chatId)
+            .not("hidden", "cs", `{"${userId}"}`)
             .not("redirected_id", "is", null)
             .order("id", { ascending: false })
             .limit(1000);
@@ -257,10 +258,12 @@ export default function (app, supabase) {
                             id,
                             chat_id,
                             created_at,
-                            sender_id
+                            sender_id,
+                            hidden
                         )
                     `)
                     .eq("messages.chat_id", chatId)
+                    .not("messages.hidden", "cs", `{"${userId}"}`)
                     .order("id", { ascending: false })
                     .limit(1000);
 
@@ -298,6 +301,7 @@ export default function (app, supabase) {
                 const redirectedItems = await getRedirectedMedia(
                     supabase,
                     chatId,
+                    userId,
                     category,
                     beforeId,
                     limit
@@ -346,6 +350,7 @@ export default function (app, supabase) {
                     .from("messages")
                     .select("id, content, created_at, sender_id")
                     .eq("chat_id", chatId)
+                    .not("hidden", "cs", `{"${userId}"}`)
                     .not("content", "is", null)
                     .order("id", { ascending: false })
                     .limit(100);
@@ -404,6 +409,7 @@ export default function (app, supabase) {
                 .from("messages")
                 .select("id, redirected_id, created_at, sender_id")
                 .eq("chat_id", chatId)
+                .not("hidden", "cs", `{"${userId}"}`)
                 .not("redirected_id", "is", null)
                 .order("id", { ascending: false })
                 .limit(1000);
