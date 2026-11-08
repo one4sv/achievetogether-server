@@ -24,13 +24,17 @@ export default function(app, supabase) {
       }
 
       const { data: user, error: emailError } = await supabase.from("users")
-        .select("id, mail, nick, pass").eq("mail", email).maybeSingle();
+        .select("id, mail, nick, pass, deletion_requested_at").eq("mail", email).maybeSingle();
       if (emailError) throw emailError;
       if (!user) return res.status(401).json({ success: false, error: "Неверный email или пароль" });
 
       // 2️⃣ Проверяем пароль
       const valid = await bcrypt.compare(pass, user.pass);
       if (!valid) return res.status(401).json({ success: false, error: "Неверный email или пароль" });
+      if (user.deletion_requested_at) {
+        const deadline = new Date(new Date(user.deletion_requested_at).getTime() + 30 * 86400000).toISOString();
+        return res.status(423).json({ success: false, code: "DELETION_PENDING", email: user.mail, deadline });
+      }
 
       // 3️⃣ Получаем настройки, чтобы проверить двухфакторку
       const { data: settings, error: settingsError } = await supabase
