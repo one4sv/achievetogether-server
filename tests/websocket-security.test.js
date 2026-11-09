@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocket } from "ws";
-import initWebSocket, { broadcastReaction, broadcastMessageDeleted, broadcastMessageEdited, broadcastMessageRead, broadcastGroupUpdated, broadcastPinToggle, canSeePresence } from "../realtime/ws.js";
+import initWebSocket, { broadcastReaction, broadcastMessageDeleted, broadcastMessageEdited, broadcastMessageRead, broadcastGroupUpdated, broadcastPinToggle, canSeePresence, isUserOnline } from "../realtime/ws.js";
 
 test("real websocket connections isolate chat events and reject malformed/group-spoofed input", { timeout: 10000 }, async () => {
     const users = ["owner", "member", "outsider", "blocked"];
@@ -59,6 +59,8 @@ test("real websocket connections isolate chat events and reject malformed/group-
             await once(socket, "open");
         }
         await delay(30);
+        assert.equal(isUserOnline("owner"), true);
+        assert.equal(isUserOnline("outsider"), true);
         inboxes.forEach(inbox => inbox.splice(0));
         await broadcastReaction(10, { messageId: 1, user_id: "owner", reaction: "👍", removed: false });
         await broadcastMessageDeleted(10, 1, "member");
@@ -96,6 +98,7 @@ test("real websocket connections isolate chat events and reject malformed/group-
         const closed = sockets.map(socket => socket.readyState === WebSocket.CLOSED ? Promise.resolve() : once(socket, "close"));
         sockets.forEach(socket => socket.close());
         await Promise.all(closed);
+        assert.equal(isUserOnline("owner"), false);
         await new Promise(resolve => wss.close(resolve));
         await new Promise(resolve => server.close(resolve));
     }
