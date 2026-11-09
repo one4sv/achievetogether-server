@@ -52,7 +52,7 @@ export default function (app, supabase) {
       }
 
       let habits = [];
-      if (privateRules.habits !== "nobody") {
+      if (req.user?.id === acc.id || privateRules.habits !== "nobody") {
         const { data, error: habitsError } = await habitsQuery;
         if (habitsError) throw habitsError;
         habits = data || [];
