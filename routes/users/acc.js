@@ -68,7 +68,8 @@ export default function (app, supabase) {
       const publicAcc = {
         ...acc,
         last_online: canShowPresence ? acc.last_online : null,
-        is_online: canShowPresence && isUserOnline(acc.id)
+        is_online: canShowPresence && isUserOnline(acc.id),
+        can_view_presence: canShowPresence
       };
 
       let habitsQuery = supabase
