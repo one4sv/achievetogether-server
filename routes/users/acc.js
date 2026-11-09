@@ -9,7 +9,7 @@ export default function (app, supabase) {
 
       const { data: acc, error: accError } = await supabase
         .from("users")
-        .select("*")
+        .select("id, nick, username, bio, avatar_url, last_online, registration_date, date_of_birth, sex")
         .eq("nick", nick)
         .maybeSingle();
 
@@ -27,7 +27,20 @@ export default function (app, supabase) {
       if (settingsError) throw settingsError;
 
       const showArchived = settingsData?.show_archived_in_acc ?? false;
-      const isPrivate = settingsData?.private ?? false;
+      const privacy = settingsData?.private && typeof settingsData.private === "object"
+        ? settingsData.private : {};
+      const rules = { number: "nobody", mail: "nobody", habits: "all", posts: "all", ...privacy };
+      let isContact = req.user?.id === acc.id;
+      if (!isContact && req.user?.id && Object.values(rules).includes("contacts")) {
+        isContact = (await visiblePosts(supabase,
+          [{ user_id: acc.id, visibility: "contacts" }], req.user.id)).length > 0;
+      }
+      const privateRules = { ...rules };
+      if (!isContact) {
+        for (const key of ["number", "mail", "habits", "posts"]) {
+          if (privateRules[key] === "contacts") privateRules[key] = "nobody";
+        }
+      }
 
       let habitsQuery = supabase
         .from("habits")
@@ -38,8 +51,12 @@ export default function (app, supabase) {
         habitsQuery = habitsQuery.eq("ongoing", true);
       }
 
-      const { data: habits, error: habitsError } = await habitsQuery;
-      if (habitsError) throw habitsError;
+      let habits = [];
+      if (privateRules.habits !== "nobody") {
+        const { data, error: habitsError } = await habitsQuery;
+        if (habitsError) throw habitsError;
+        habits = data || [];
+      }
 
       const { data: posts, error: postsError } = await supabase
         .from("posts")
@@ -53,7 +70,7 @@ export default function (app, supabase) {
         success: true,
         acc,
         habits: habits || [],
-        privateRules: isPrivate,
+        privateRules,
         posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id), "media", "posts"),
       });
     } catch (err) {
