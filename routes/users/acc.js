@@ -1,5 +1,24 @@
 import { visiblePosts, signedRows } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
+import { isUserOnline } from "../../realtime/ws.js";
+
+async function canViewProfilePresence(supabase, viewerId, subjectId) {
+  if (!viewerId) return false;
+  if (viewerId === subjectId) return true;
+  const { data: mine, error: mineError } = await supabase.from("chat_members")
+    .select("chat_id,is_blocked,chats!inner(is_group)")
+    .eq("user_id", viewerId).eq("chats.is_group", false);
+  if (mineError) return false;
+  const ids = (mine || []).map(item => item.chat_id);
+  if (!ids.length) return true;
+  const { data: theirs, error: theirError } = await supabase.from("chat_members")
+    .select("chat_id,is_blocked,chats!inner(is_group)")
+    .eq("user_id", subjectId).eq("chats.is_group", false).in("chat_id", ids);
+  if (theirError) return false;
+  const byChat = new Map((mine || []).map(item => [String(item.chat_id), item]));
+  return !(theirs || []).some(item => item.is_blocked || byChat.get(String(item.chat_id))?.is_blocked);
+}
+
 
 export default function (app, supabase) {
   app.get("/acc/:nick", authenticateUser(supabase), async (req, res) => {
@@ -42,6 +61,17 @@ export default function (app, supabase) {
         }
       }
 
+      const presenceRule = rules.presence || "all";
+      const canShowPresence = (req.user?.id === acc.id || presenceRule === "all"
+        || (presenceRule === "contacts" && isContact))
+        && await canViewProfilePresence(supabase, req.user?.id, acc.id);
+      const publicAcc = {
+        ...acc,
+        last_online: canShowPresence ? acc.last_online : null,
+        is_online: canShowPresence && isUserOnline(acc.id),
+        can_view_presence: canShowPresence
+      };
+
       let habitsQuery = supabase
         .from("habits")
         .select("*")
@@ -68,7 +98,7 @@ export default function (app, supabase) {
 
       return res.json({
         success: true,
-        acc,
+        acc: publicAcc,
         habits: habits || [],
         privateRules,
         posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id), "media", "posts"),

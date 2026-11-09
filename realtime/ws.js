@@ -6,6 +6,12 @@ let clientsMap = new Map();
 let supabaseGlobal;
 let broadcastUserStatus;
 
+// A profile lookup reads this on demand; realtime status events remain limited to shared chats.
+export function isUserOnline(userId) {
+  const sockets = clientsMap.get(userId);
+  return !!sockets && [...sockets].some(socket => socket.readyState === WebSocket.OPEN);
+}
+
 // Presence is private conversation metadata, never a broadcast to all signed-in users.
 export async function canSeePresence(supabase, viewerId, subjectId) {
   if (!viewerId || !subjectId) return false;
