@@ -46,25 +46,34 @@ function validPath(path) {
         !/[\\\u0000-\u001f\u007f?#]/.test(path);
 }
 
+async function* matchingRows(supabase, table, columns, field, value) {
+    // Iterate in stable order. A forwarded file can have more than 200 visible copies.
+    const pageSize = 100;
+    for (let offset = 0; offset < 10000; offset += pageSize) {
+        const { data, error } = await supabase.from(table)
+            .select(columns).eq(field, value)
+            .order("id", { ascending: true }).range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        yield data || [];
+        if (!data || data.length < pageSize) return;
+    }
+}
+
 export async function canDownloadMedia(supabase, path, userId) {
     const publicUrl = supabase.storage.from("media").getPublicUrl(path).data.publicUrl;
-    const { data: files, error } = await supabase.from("message_files")
-        .select("id,message_id,file_type,file_name").eq("file_url", publicUrl).limit(30);
-    if (error) throw error;
-    if (!files?.length) return null;
+    for await (const files of matchingRows(supabase, "message_files", "id,message_id,file_type,file_name", "file_url", publicUrl)) {
+        for (const file of files) {
+            const { data: original, error: sourceError } = await supabase.from("messages")
+                .select("id,chat_id,hidden").eq("id", file.message_id).maybeSingle();
+            if (sourceError) throw sourceError;
+            if (!original) continue;
+            if (await canAccessMessage(supabase, original, userId)) return file;
 
-    for (const file of files) {
-        const { data: original, error: sourceError } = await supabase.from("messages")
-            .select("id,chat_id,hidden").eq("id", file.message_id).maybeSingle();
-        if (sourceError) throw sourceError;
-        if (!original) continue;
-        if (await canAccessMessage(supabase, original, userId)) return file;
-
-        const { data: forwards, error: forwardError } = await supabase.from("messages")
-            .select("id,chat_id,hidden").eq("redirected_id", original.id).limit(200);
-        if (forwardError) throw forwardError;
-        for (const forward of forwards || []) {
-            if (await canAccessMessage(supabase, forward, userId)) return file;
+            for await (const forwards of matchingRows(supabase, "messages", "id,chat_id,hidden", "redirected_id", original.id)) {
+                for (const forward of forwards) {
+                    if (await canAccessMessage(supabase, forward, userId)) return file;
+                }
+            }
         }
     }
     return null;

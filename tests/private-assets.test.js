@@ -47,6 +47,8 @@ function fakeSupabase({ blocked = false, hidden = false, forwarded = false, hasM
                 select() { return query; },
                 eq(key, value) { filters.push(row => row[key] === value); return query; },
                 limit() { return Promise.resolve({ data: tables[table].filter(row => filters.every(f => f(row))), error: null }); },
+                order() { return query; },
+                range(start, end) { return Promise.resolve({ data: tables[table].filter(row => filters.every(f => f(row))).slice(start, end + 1), error: null }); },
                 maybeSingle() { return Promise.resolve({ data: tables[table].find(row => filters.every(f => f(row))) || null, error: null }); }
             };
             return query;
