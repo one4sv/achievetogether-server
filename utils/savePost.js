@@ -2,6 +2,12 @@ import crypto from "crypto";
 import path from "path";
 import { parseArray, validateContent, visibilityValues } from "./postContent.js";
 
+export function normalizeUploadFileName(name) {
+    if (!/[ÐÑ]/.test(name) || [...name].some(char => char.charCodeAt(0) > 255)) return name;
+    const decoded = Buffer.from(name, "latin1").toString("utf8");
+    return decoded.includes("\uFFFD") || !/[\u0400-\u04FF]/.test(decoded) ? name : decoded;
+}
+
 export function savePost(supabase, editing) {
     return async (req, res) => {
         const user_id = req.user?.id;
@@ -63,7 +69,8 @@ export function savePost(supabase, editing) {
             const media = [...kept];
             for (let index = 0; index < files.length; index++) {
                 const file = files[index];
-                const extension = path.extname(file.originalname).replace(/[^.a-zA-Z0-9]/g, "").slice(0, 12);
+                const originalName = normalizeUploadFileName(file.originalname);
+                const extension = path.extname(originalName).replace(/[^.a-zA-Z0-9]/g, "").slice(0, 12);
                 const filePath = `${user_id}/${post_id}/${crypto.randomUUID()}${extension}`;
                 const { error } = await supabase.storage.from("posts").upload(filePath, file.buffer, {
                     contentType: file.mimetype
@@ -71,7 +78,7 @@ export function savePost(supabase, editing) {
                 if (error) throw error;
                 uploaded.push(filePath);
                 const { data } = supabase.storage.from("posts").getPublicUrl(filePath);
-                media.push({ id: ids[index], name: file.originalname, type: file.mimetype, url: data.publicUrl });
+                media.push({ id: ids[index], name: originalName, type: file.mimetype, url: data.publicUrl });
             }
             const { error } = await supabase.from("posts")
                 .update({ text, content, media, visibility, habit_id }).eq("id", post_id).eq("user_id", user_id);
