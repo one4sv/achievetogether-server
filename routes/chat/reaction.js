@@ -24,22 +24,16 @@ export default function (app, supabase) {
         return res.status(404).json({ success: false, error: "Сообщение не найдено" });
       }
 
-      const reactions = message.reactions || [];
+      const reactions = Array.isArray(message.reactions) ? message.reactions : [];
       if (!(await canAccessMessage(supabase, message, user_id))) {
         return res.status(403).json({ success: false, error: "Нет доступа к сообщению" });
       }
 
-      // Проверяем, есть ли уже реакция пользователя
-      const hasReaction = reactions.find(r => r.user_id === user_id && r.reaction === reaction);
-
-      let updatedReactions;
-      if (hasReaction) {
-        // Удаляем реакцию (toggle off)
-        updatedReactions = reactions.filter(r => !(r.user_id === user_id && r.reaction === reaction));
-      } else {
-        // Добавляем новую реакцию
-        updatedReactions = [...reactions, { user_id, reaction }];
-      }
+      // У пользователя может быть только одна реакция на сообщение.
+      // Повторное нажатие убирает её, другая реакция заменяет предыдущую.
+      const hasReaction = reactions.some(r => r.user_id === user_id && r.reaction === reaction);
+      const updatedReactions = reactions.filter(r => r.user_id !== user_id);
+      if (!hasReaction) updatedReactions.push({ user_id, reaction });
 
       const { error: updateError } = await supabase
         .from("messages")
