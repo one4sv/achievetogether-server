@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import createApp from "./app.js";
 import initWebSocket from "./realtime/ws.js";
 import { startHabitReminderWorker } from "./services/habitReminderWorker.js";
+import { startPlanReminderWorker } from "./services/planReminderWorker.js";
 import { startAccountStorageCleanup } from "./services/accountStorageCleanup.js";
 import { startFeedbackOutboxWorker } from "./services/feedbackOutbox.js";
 
@@ -19,6 +20,7 @@ const app = createApp(supabase);
 const server = createServer(app);
 initWebSocket(supabase, server);
 startHabitReminderWorker(supabase);
+startPlanReminderWorker(supabase);
 startAccountStorageCleanup(supabase);
 startFeedbackOutboxWorker(supabase);
 
