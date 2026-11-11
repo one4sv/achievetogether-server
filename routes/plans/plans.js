@@ -82,17 +82,23 @@ async function details(supabase,entry,userId) {
         supabase.from("one_off_plan_completions").select("user_id,completed_at").eq("plan_id",plan.id)
     ]);
     if (membersResult.error || doneResult.error) throw membersResult.error || doneResult.error;
-    const activeIds = (membersResult.data || []).filter(m => m.status === "accepted").map(m => m.user_id);
-    if (!activeIds.includes(plan.owner_id)) activeIds.unshift(plan.owner_id);
+    const memberships = (membersResult.data || []).filter(m => m.status === "accepted" || (entry.owner && m.status === "pending"));
+    const activeIds = [...new Set(memberships.filter(m => m.status === "accepted").map(m => m.user_id).concat(plan.owner_id))];
+    const visibleIds = [...new Set(memberships.map(m => m.user_id).concat(plan.owner_id))];
     const { data: users, error } = await supabase.from("users")
-        .select("id,nick,username,avatar_url").in("id",activeIds);
+        .select("id,nick,username,avatar_url").in("id",visibleIds);
     if (error) throw error;
+    const statuses = new Map(memberships.map(m => [m.user_id,m.status]));
     const completed = new Set((doneResult.data || []).map(c => c.user_id));
     return { ...plan, is_owner: entry.owner, membership_status: entry.status,
         completed_for_me: plan.status === "completed" || completed.has(userId),
         completed_count: plan.status === "completed" ? activeIds.length : activeIds.filter(id => completed.has(id)).length,
         participants_count: activeIds.length,
-        members: (users || []).map(u => ({ ...u, completed: plan.status === "completed" || completed.has(u.id) })) };
+        members: (users || []).map(u => ({
+            ...u, status: statuses.get(u.id) || "accepted", is_owner: u.id === plan.owner_id,
+            completed: (statuses.get(u.id) || "accepted") === "accepted" &&
+                (plan.status === "completed" || completed.has(u.id))
+        })) };
 }
 async function areContacts(supabase,one,two) {
     const { data: mine, error } = await supabase.from("chat_members")
@@ -257,7 +263,7 @@ export default function registerPlans(app,supabase) {
         try {
             const entry = await access(supabase,req.params.id,req.user.id);
             if (!entry) return res.status(404).json({ success: false });
-            if (!entry.owner || entry.plan.kind !== "shared" || entry.plan.status !== "upcoming")
+            if (!entry.owner || entry.plan.status !== "upcoming")
                 return res.status(403).json({ success: false });
             const { data: target,error } = await supabase.from("users")
                 .select("id").eq("nick",req.body.nick).maybeSingle();
@@ -278,7 +284,50 @@ export default function registerPlans(app,supabase) {
                 .upsert({ plan_id:entry.plan.id,user_id:target.id,status:"pending",
                     invited_by:req.user.id,joined_at:null }, { onConflict:"plan_id,user_id" });
             if (inviteError) throw inviteError;
+            if (entry.plan.kind === "personal") {
+                // An invitation turns the existing private plan into a shared one.
+                // If promotion fails, withdraw the just-created invitation.
+                const { error: promoteError } = await supabase.from("one_off_plans")
+                    .update({ kind:"shared", updated_at:new Date().toISOString() })
+                    .eq("id",entry.plan.id).eq("owner_id",req.user.id);
+                if (promoteError) {
+                    await supabase.from("one_off_plan_members")
+                        .delete().eq("plan_id",entry.plan.id).eq("user_id",target.id).eq("status","pending");
+                    throw promoteError;
+                }
+            }
             return res.json({ success: true });
+        } catch(error) { return failed(res,error); }
+    });
+
+    app.delete("/plans/:id/members/:memberId",auth,async(req,res) => {
+        if (!signedIn(req,res)) return;
+        const memberId = req.params.memberId;
+        if (typeof memberId !== "string" || !/^[0-9a-f-]{36}$/i.test(memberId))
+            return res.status(400).json({ success:false });
+        try {
+            const entry = await access(supabase,req.params.id,req.user.id);
+            if (!entry) return res.status(404).json({ success:false });
+            if (!entry.owner) return res.status(403).json({ success:false });
+            if (entry.plan.status === "canceled") return res.status(409).json({ success:false });
+            if (memberId === entry.plan.owner_id) return res.status(403).json({ success:false });
+            const { data: existing, error:lookupError } = await supabase.from("one_off_plan_members")
+                .select("status").eq("plan_id",entry.plan.id).eq("user_id",memberId).maybeSingle();
+            if (lookupError) throw lookupError;
+            if (!existing || existing.status === "declined")
+                return res.status(404).json({ success:false });
+            const { error } = await supabase.from("one_off_plan_members")
+                .delete().eq("plan_id",entry.plan.id).eq("user_id",memberId);
+            if (error) throw error;
+            // The removed user no longer has access or a completion/comment in this plan.
+            const [completion,comment] = await Promise.all([
+                supabase.from("one_off_plan_completions").delete()
+                    .eq("plan_id",entry.plan.id).eq("user_id",memberId),
+                supabase.from("one_off_plan_comments").delete()
+                    .eq("plan_id",entry.plan.id).eq("user_id",memberId)
+            ]);
+            if (completion.error || comment.error) throw completion.error || comment.error;
+            return res.json({ success:true });
         } catch(error) { return failed(res,error); }
     });
 

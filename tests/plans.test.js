@@ -147,3 +147,20 @@ test("plan tag is optional, follows activity tag keys, and can be updated or cle
     assert.equal(validateOneOffPlanInput({ ...base, tag:"<script>" },true),null);
     assert.equal(validateOneOffPlanInput({tag:"invalid-tag"}),null);
 });
+
+// Inviting from the participant section is what promotes a new personal plan.
+test("personal plans can be promoted on the first invite without exposing them to nonmembers", async () => {
+    const app = mockedPlanServer();
+    const blocked = await callPlanRoute(app,"POST","/plans/:id/invite",outsider,{ nick:"someone" });
+    assert.equal(blocked.status,403);
+    assert.equal(app.getWrites(),0);
+});
+
+test("plan member removal is owner-only and never removes its owner", async () => {
+    const app = mockedPlanServer("accepted");
+    const notOwner = await callPlanRoute(app,"DELETE","/plans/:id/members/:memberId",outsider);
+    assert.equal(notOwner.status,403);
+    const notLoggedIn = await callPlanRoute(app,"DELETE","/plans/:id/members/:memberId",null);
+    assert.equal(notLoggedIn.status,401);
+    assert.equal(app.getWrites(),0);
+});
