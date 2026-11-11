@@ -16,7 +16,7 @@ function isZone(value) {
     try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; }
     catch { return false; }
 }
-function validate(body, creating = false) {
+export function validateOneOffPlanInput(body, creating = false) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const keys = ["name","description","plan_date","start_time","end_time",
         "timezone","place","kind","completion_mode","visibility","join_mode"];
@@ -151,7 +151,7 @@ export default function registerPlans(app,supabase) {
 
     app.post("/plans",auth,async(req,res) => {
         if (!signedIn(req,res)) return;
-        const v = validate(req.body,true);
+        const v = validateOneOffPlanInput(req.body,true);
         if (!v) return res.status(400).json({ success: false, error: "Некорректные поля плана" });
         try {
             const { data: plan, error } = await supabase.from("one_off_plans")
@@ -179,7 +179,7 @@ export default function registerPlans(app,supabase) {
 
     app.patch("/plans/:id",auth,async(req,res) => {
         if (!signedIn(req,res)) return;
-        const v = validate(req.body);
+        const v = validateOneOffPlanInput(req.body);
         if (!v || !Object.keys(v).length || "kind" in v) return res.status(400).json({ success: false });
         try {
             const entry = await access(supabase,req.params.id,req.user.id);
