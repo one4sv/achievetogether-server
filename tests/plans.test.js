@@ -107,3 +107,9 @@ test("unauthenticated requests are rejected before database reads", async () => 
     assert.equal(result.status,401);
     assert.equal(app.getWrites(),0);
 });
+
+test("plan descriptions are limited to 1200 characters", () => {
+    assert.equal(validateOneOffPlanInput({ ...base, description: "x".repeat(1200) }, true)?.description.length, 1200);
+    assert.equal(validateOneOffPlanInput({ ...base, description: "x".repeat(1201) }, true), null);
+    assert.equal(validateOneOffPlanInput({ description: "x".repeat(1201) }), null);
+});

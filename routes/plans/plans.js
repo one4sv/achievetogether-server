@@ -26,7 +26,7 @@ export function validateOneOffPlanInput(body, creating = false) {
     for (const key of keys) if (Object.hasOwn(body, key)) v[key] = body[key];
     if ("name" in v && (typeof v.name !== "string" || !v.name.trim() || v.name.length > 160)) return null;
     if ("name" in v) v.name = v.name.trim();
-    if ("description" in v && (typeof v.description !== "string" || v.description.length > 12000)) return null;
+    if ("description" in v && (typeof v.description !== "string" || v.description.length > 1200)) return null;
     if ("place" in v && (typeof v.place !== "string" || v.place.length > 500)) return null;
     if ("plan_date" in v && !isDate(v.plan_date)) return null;
     if (["start_time","end_time"].some(key => key in v && v[key] !== null && (typeof v[key] !== "string" || !TIME.test(v[key])))) return null;
