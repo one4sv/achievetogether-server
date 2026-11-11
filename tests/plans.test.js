@@ -152,7 +152,8 @@ test("plan tag is optional, follows activity tag keys, and can be updated or cle
 test("personal plans can be promoted on the first invite without exposing them to nonmembers", async () => {
     const app = mockedPlanServer();
     const blocked = await callPlanRoute(app,"POST","/plans/:id/invite",outsider,{ nick:"someone" });
-    assert.equal(blocked.status,403);
+    // Conceal the existence of private plans from nonmembers.
+    assert.equal(blocked.status,404);
     assert.equal(app.getWrites(),0);
 });
 
