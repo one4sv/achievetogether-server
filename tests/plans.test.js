@@ -113,3 +113,27 @@ test("plan descriptions are limited to 1200 characters", () => {
     assert.equal(validateOneOffPlanInput({ ...base, description: "x".repeat(1201) }, true), null);
     assert.equal(validateOneOffPlanInput({ description: "x".repeat(1201) }), null);
 });
+
+
+test("one-off plan comments are inaccessible to nonmembers", async () => {
+    const app = mockedPlanServer();
+    const get = await callPlanRoute(app,"GET","/plans/:id/comment",outsider);
+    const write = await callPlanRoute(app,"POST","/plans/:id/comment",outsider,{comment:"private"});
+    assert.equal(get.status,404);
+    assert.equal(write.status,404);
+    assert.equal(app.getWrites(),0);
+});
+test("pending invite cannot read or write plan comments", async () => {
+    const app = mockedPlanServer("pending");
+    const get = await callPlanRoute(app,"GET","/plans/:id/comment",outsider);
+    const write = await callPlanRoute(app,"POST","/plans/:id/comment",outsider,{comment:"pending"});
+    assert.equal(get.status,403);
+    assert.equal(write.status,403);
+    assert.equal(app.getWrites(),0);
+});
+test("plan comment rejects texts longer than 200 characters", async () => {
+    const app = mockedPlanServer();
+    const result = await callPlanRoute(app,"POST","/plans/:id/comment",owner,{comment:"x".repeat(201)});
+    assert.equal(result.status,400);
+    assert.equal(app.getWrites(),0);
+});
