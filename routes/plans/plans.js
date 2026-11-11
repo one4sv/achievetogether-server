@@ -5,6 +5,7 @@ const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const MODES = ["personal", "shared"];
 const CHOICES = ["nobody", "contacts", "all"];
 const JOINS = ["invite", "request", "open"];
+const TAGS = new Set(["coding","paint","photo","music","games","dice","sleep","walking","food","hockey","cycling","skiing","snowboarding","swimming","pingpong","tennis","bowling","boxing","basketball","running","football","strategy","volleyball","yoga ","sport","study","work"]);
 
 function isDate(value) {
     if (typeof value !== "string" || !DATE.test(value)) return false;
@@ -19,7 +20,7 @@ function isZone(value) {
 export function validateOneOffPlanInput(body, creating = false) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const keys = ["name","description","plan_date","start_time","end_time",
-        "timezone","place","kind","completion_mode","visibility","join_mode"];
+        "timezone","place","tag","kind","completion_mode","visibility","join_mode"];
     if (Object.keys(body).some(key => !keys.includes(key))) return null;
     if (creating && (!body.name || !body.plan_date)) return null;
     const v = {};
@@ -28,6 +29,7 @@ export function validateOneOffPlanInput(body, creating = false) {
     if ("name" in v) v.name = v.name.trim();
     if ("description" in v && (typeof v.description !== "string" || v.description.length > 1200)) return null;
     if ("place" in v && (typeof v.place !== "string" || v.place.length > 500)) return null;
+    if ("tag" in v && v.tag !== null && !TAGS.has(v.tag)) return null;
     if ("plan_date" in v && !isDate(v.plan_date)) return null;
     if (["start_time","end_time"].some(key => key in v && v[key] !== null && (typeof v[key] !== "string" || !TIME.test(v[key])))) return null;
     if ("timezone" in v && !isZone(v.timezone)) return null;

@@ -137,3 +137,13 @@ test("plan comment rejects texts longer than 200 characters", async () => {
     assert.equal(result.status,400);
     assert.equal(app.getWrites(),0);
 });
+
+
+test("plan tag is optional, follows activity tag keys, and can be updated or cleared", () => {
+    assert.equal(validateOneOffPlanInput(base,true).tag, undefined);
+    assert.equal(validateOneOffPlanInput({ ...base, tag:"work" },true)?.tag,"work");
+    assert.deepEqual(validateOneOffPlanInput({tag:null}),{tag:null});
+    assert.deepEqual(validateOneOffPlanInput({tag:"coding"}),{tag:"coding"});
+    assert.equal(validateOneOffPlanInput({ ...base, tag:"<script>" },true),null);
+    assert.equal(validateOneOffPlanInput({tag:"invalid-tag"}),null);
+});
