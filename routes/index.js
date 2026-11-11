@@ -57,9 +57,11 @@ import LinkPreviewRoutes from "./system/link-preview.js";
 import ChatMediaRoutes from "./chat/ChatMedia.js";
 import feedbackRoutes from "./system/feedback.js";
 import privateAssetRoutes from "./system/private-assets.js";
+import planRoutes from "./plans/plans.js";
 
 export default function registerAllRoutes(app, supabase) {
     privateAssetRoutes(app, supabase);
+    planRoutes(app, supabase);
 
     authRoutes(app, supabase);
     accountSecurityRoutes(app, supabase);
