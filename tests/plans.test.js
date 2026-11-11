@@ -165,3 +165,65 @@ test("plan member removal is owner-only and never removes its owner", async () =
     assert.equal(notLoggedIn.status,401);
     assert.equal(app.getWrites(),0);
 });
+
+test("owner invitation upgrades a personal plan, exposes pending status only to the owner and supports withdrawal", async () => {
+    const targetId = "33333333-3333-4333-8333-333333333333";
+    const rows = {
+        one_off_plans: [{
+            id: 1, owner_id: owner, name: "Private appointment", description: "Private notes",
+            plan_date: "2026-11-20", start_time: null, timezone: "Europe/Moscow",
+            kind: "personal", completion_mode: "personal", status: "upcoming"
+        }],
+        one_off_plan_members: [{ plan_id: 1, user_id: owner, status: "accepted" }],
+        one_off_plan_completions: [],
+        one_off_plan_comments: [],
+        users: [
+            { id: owner, nick: "owner", username: "Owner", avatar_url: null },
+            { id: targetId, nick: "target", username: "Target", avatar_url: null }
+        ],
+        chat_members: [
+            { chat_id: 12, user_id: owner, is_blocked: false, "chats.is_group": false },
+            { chat_id: 12, user_id: targetId, is_blocked: false, "chats.is_group": false }
+        ],
+        settings: [{ user_id: targetId, private: { plan_invites: "contacts" } }]
+    };
+    const supabase = { from(table) {
+        let action = "select";
+        let values = null;
+        const predicates = [];
+        const query = {
+            select() { return query; },
+            eq(column, value) { predicates.push(row => String(row[column]) === String(value)); return query; },
+            in(column, values) { predicates.push(row => values.map(String).includes(String(row[column]))); return query; },
+            maybeSingle() {
+                return Promise.resolve({ data: (rows[table] || []).find(row => predicates.every(f => f(row))) || null, error: null });
+            },
+            update(value) { action = "update"; values = value; return query; },
+            upsert(value) { action = "upsert"; values = value; return query; },
+            delete() { action = "delete"; return query; },
+            then(resolve, reject) {
+                const matching = (rows[table] || []).filter(row => predicates.every(f => f(row)));
+                if (action === "update") matching.forEach(row => Object.assign(row, values));
+                if (action === "upsert") rows[table].push({ ...values });
+                if (action === "delete") rows[table] = rows[table].filter(row => !matching.includes(row));
+                return Promise.resolve({ data: matching, error: null }).then(resolve, reject);
+            }
+        };
+        return query;
+    }};
+    const routes = new Map();
+    const app = {};
+    for (const method of ["get", "post", "patch", "delete"]) {
+        app[method] = (path, ...handlers) => routes.set(method.toUpperCase() + " " + path, handlers.at(-1));
+    }
+    registerPlans(app, supabase);
+    const send = await callPlanRoute({ routes }, "POST", "/plans/:id/invite", owner, { nick: "target" });
+    assert.equal(send.status, 200);
+    assert.equal(rows.one_off_plans[0].kind, "shared");
+    const details = await callPlanRoute({ routes }, "GET", "/plans/:id", owner);
+    assert.equal(details.payload.plan.members.find(member => member.id === targetId)?.status, "pending");
+    assert.equal(details.payload.plan.participants_count, 1);
+    const remove = await callPlanRoute({ routes }, "DELETE", "/plans/:id/members/:memberId", owner);
+    assert.equal(remove.status, 200);
+    assert.equal(rows.one_off_plan_members.some(member => member.user_id === targetId), false);
+});
