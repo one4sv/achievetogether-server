@@ -297,6 +297,62 @@ export default function registerPlans(app,supabase) {
         } catch(error) { return failed(res,error); }
     });
 
+    app.get("/plans/:id/comment",auth,async(req,res) => {
+        if (!signedIn(req,res)) return;
+        try {
+            const entry = await access(supabase,req.params.id,req.user.id);
+            if (!entry) return res.status(404).json({ success:false });
+            if (entry.status !== "accepted") return res.status(403).json({ success:false });
+            const [{ data: comments,error },{ data: members,error:membersError }] = await Promise.all([
+                supabase.from("one_off_plan_comments").select("user_id,comment,updated_at")
+                    .eq("plan_id",entry.plan.id).order("updated_at",{ ascending:false }),
+                supabase.from("one_off_plan_members").select("user_id,status").eq("plan_id",entry.plan.id)
+            ]);
+            if (error || membersError) throw error || membersError;
+            const allowed = new Set([entry.plan.owner_id,...(members || [])
+                .filter(member => member.status === "accepted").map(member => member.user_id)]);
+            const active = (comments || []).filter(item => allowed.has(item.user_id));
+            const { data: users,error:usersError } = active.length ?
+                await supabase.from("users").select("id,nick,username,avatar_url")
+                    .in("id",active.map(item => item.user_id)) :
+                { data:[],error:null };
+            if (usersError) throw usersError;
+            return res.json({
+                success:true,
+                comment:active.find(item => item.user_id === req.user.id)?.comment || "",
+                comments:entry.plan.kind === "shared" ? active.map(item => ({
+                    ...item, user:(users || []).find(user => user.id === item.user_id) || null
+                })) : []
+            });
+        } catch(error) { return failed(res,error); }
+    });
+
+    app.post("/plans/:id/comment",auth,async(req,res) => {
+        if (!signedIn(req,res)) return;
+        const comment = req.body?.comment;
+        if (typeof comment !== "string" || comment.length > 200) {
+            return res.status(400).json({ success:false,error:"Комментарий должен быть не длиннее 200 символов" });
+        }
+        try {
+            const entry = await access(supabase,req.params.id,req.user.id);
+            if (!entry) return res.status(404).json({ success:false });
+            if (entry.status !== "accepted" || entry.plan.status === "canceled")
+                return res.status(403).json({ success:false });
+            if (!comment.trim()) {
+                const { error } = await supabase.from("one_off_plan_comments")
+                    .delete().eq("plan_id",entry.plan.id).eq("user_id",req.user.id);
+                if (error) throw error;
+            } else {
+                const { error } = await supabase.from("one_off_plan_comments").upsert({
+                    plan_id:entry.plan.id, user_id:req.user.id,comment,
+                    updated_at:new Date().toISOString()
+                },{ onConflict:"plan_id,user_id" });
+                if (error) throw error;
+            }
+            return res.json({ success:true,comment:comment.trim() ? comment : "" });
+        } catch(error) { return failed(res,error); }
+    });
+
     app.delete("/plans/:id",auth,async(req,res) => {
         if (!signedIn(req,res)) return;
         try {
