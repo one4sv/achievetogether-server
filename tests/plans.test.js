@@ -72,7 +72,7 @@ function mockedPlanServer(membershipStatus = null) {
     return { routes, getWrites:() => writes };
 }
 
-async function callPlanRoute(server,method,path,userId,body = {}) {
+async function callPlanRoute(server,method,path,userId,body = {},memberId = outsider) {
     const handler = server.routes.get(method + " " + path);
     let status = 200;
     let payload = null;
@@ -80,7 +80,7 @@ async function callPlanRoute(server,method,path,userId,body = {}) {
         status(value) { status = value; return res; },
         json(value) { payload = value; return res; }
     };
-    await handler({ user:userId ? {id:userId} : null,params:{id:"1",memberId:outsider},body },res);
+    await handler({ user:userId ? {id:userId} : null,params:{id:"1",memberId},body },res);
     return { status,payload };
 }
 test("nonmembers cannot read, edit or complete private plans", async () => {
@@ -223,7 +223,7 @@ test("owner invitation upgrades a personal plan, exposes pending status only to 
     const details = await callPlanRoute({ routes }, "GET", "/plans/:id", owner);
     assert.equal(details.payload.plan.members.find(member => member.id === targetId)?.status, "pending");
     assert.equal(details.payload.plan.participants_count, 1);
-    const remove = await callPlanRoute({ routes }, "DELETE", "/plans/:id/members/:memberId", owner);
+    const remove = await callPlanRoute({ routes }, "DELETE", "/plans/:id/members/:memberId", owner, {}, targetId);
     assert.equal(remove.status, 200);
     assert.equal(rows.one_off_plan_members.some(member => member.user_id === targetId), false);
 });
