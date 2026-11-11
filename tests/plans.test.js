@@ -80,7 +80,7 @@ async function callPlanRoute(server,method,path,userId,body = {}) {
         status(value) { status = value; return res; },
         json(value) { payload = value; return res; }
     };
-    await handler({ user:userId ? {id:userId} : null,params:{id:"1"},body },res);
+    await handler({ user:userId ? {id:userId} : null,params:{id:"1",memberId:outsider},body },res);
     return { status,payload };
 }
 test("nonmembers cannot read, edit or complete private plans", async () => {
