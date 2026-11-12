@@ -1,4 +1,5 @@
 import { inviteGroupUsers, validUserIds } from "../../services/groupInvitations.js";
+import { linkPlanToGroup } from "../../services/planChatLink.js";
 // createchat route (исправленный и доработанный)
 import { authenticateUser } from "../../middleware/token.js";
 import multer from "multer";
@@ -42,6 +43,24 @@ export default function (app, supabase) {
       if (activityId !== null && (!Number.isSafeInteger(activityId) || activityId <= 0)) {
         return res.status(400).json({ success: false, error: "Некорректная активность" });
       }
+      const planId = req.body.plan_id === undefined ? null : Number(req.body.plan_id);
+      if (planId !== null && (!Number.isSafeInteger(planId) || planId <= 0)) {
+        return res.status(400).json({ success: false, error: "Некорректный план" });
+      }
+      if (activityId !== null && planId !== null) {
+        return res.status(400).json({ success: false, error: "Укажите либо активность, либо план" });
+      }
+      let plan = null;
+      if (planId !== null) {
+        const { data, error } = await supabase.from("one_off_plans")
+          .select("id, owner_id, chat_id, status").eq("id", planId).maybeSingle();
+        if (error) throw error;
+        if (!data) return res.status(404).json({ success: false, error: "План не найден" });
+        if (data.owner_id !== creatorId) return res.status(403).json({ success: false, error: "Только владелец может связать план с беседой" });
+        if (data.status !== "upcoming" || data.chat_id)
+          return res.status(409).json({ success: false, error: "План уже привязан или недоступен" });
+        plan = data;
+      }
       let activity = null;
       if (activityId !== null) {
         const { data: found, error: activityError } = await supabase.from("habits")
@@ -61,6 +80,12 @@ export default function (app, supabase) {
         return res.status(400).json({ success: false, error: "Некорректный список участников" });
       }
 
+      if (plan) {
+        const { data: accepted, error: acceptedError } = await supabase.from("one_off_plan_members")
+          .select("user_id").eq("plan_id", plan.id).in("status", ["accepted", "pending"]);
+        if (acceptedError) throw acceptedError;
+        parsedMembers = (accepted || []).map(item => item.user_id);
+      }
       if (activity) {
         const { data: accepted, error: acceptedError } = await supabase.from("habit_members")
           .select("user_id").eq("habit_id", activity.id).in("status", ["accepted", "pending"]);
@@ -68,7 +93,7 @@ export default function (app, supabase) {
         parsedMembers = (accepted || []).map(item => item.user_id);
       }
       parsedMembers = [...new Set(parsedMembers)].filter(id => id !== creatorId);
-      if (!activity && !parsedMembers.length) return res.status(400).json({ success: false, error: "Выберите другого участника" });
+      if (!activity && !plan && !parsedMembers.length) return res.status(400).json({ success: false, error: "Выберите другого участника" });
 
       const { data: existingUsers, error: usersError } = parsedMembers.length
         ? await supabase.from("users").select("id").in("id", parsedMembers)
@@ -234,6 +259,7 @@ export default function (app, supabase) {
             throw Object.assign(new Error("Не удалось пригласить участника активности"), { code: "42501" });
           }
         }
+        if (plan) await linkPlanToGroup(supabase, plan.id, chatId, creatorId);
         if (activity) {
           const { data: linked, error: linkError } = await supabase.from("habits")
             .update({ chat_id: chatId }).eq("id", activity.id).eq("user_id", creatorId)
