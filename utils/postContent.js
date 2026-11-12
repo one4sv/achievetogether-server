@@ -74,7 +74,7 @@ export async function visiblePosts(supabase, posts, viewer, share = null) {
 }
 
 export async function readablePost(supabase, id, viewer, share = null) {
-    if (!/^\\d+$/.test(String(id))) return null;
+    if (!/^\d+$/.test(String(id))) return null;
     const { data: post,error } = await supabase.from("posts").select("*").eq("id",id).maybeSingle();
     if (error) throw error;
     if (!post) return null;
