@@ -1,10 +1,11 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { linkPlanToGroup } from "../../services/planChatLink.js";
+import { ownerPrivacy, relationship, permitted } from "../../utils/privacy.js";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const MODES = ["personal", "shared"];
-const CHOICES = ["nobody", "contacts", "all"];
+const CHOICES = ["inherit", "nobody", "contacts", "all", "link"];
 const JOINS = ["invite", "request", "open"];
 const TAGS = new Set(["coding","paint","photo","music","games","dice","sleep","walking","food","hockey","cycling","skiing","snowboarding","swimming","pingpong","tennis","bowling","boxing","basketball","running","football","strategy","volleyball","yoga ","sport","study","work"]);
 
@@ -42,7 +43,7 @@ export function validateOneOffPlanInput(body, creating = false) {
         v.kind ||= "personal";
         v.completion_mode ||= "personal";
         v.timezone ||= "Europe/Moscow";
-        v.visibility ||= "nobody";
+        v.visibility ||= "inherit";
         v.join_mode ||= "invite";
         if (v.kind === "personal" && v.completion_mode !== "personal") return null;
     }
@@ -101,6 +102,20 @@ async function details(supabase,entry,userId) {
             completed: (statuses.get(u.id) || "accepted") === "accepted" &&
                 (plan.status === "completed" || completed.has(u.id))
         })) };
+}
+async function publicPlanAccess(supabase,plan,userId,share) {
+    const owner = await ownerPrivacy(supabase,plan.owner_id);
+    const relation = await relationship(supabase,userId,plan.owner_id);
+    return permitted({ rules:owner.rules,field:"plans",viewerId:userId,ownerId:plan.owner_id,
+        contact:relation.contact,blocked:relation.blocked,
+        override:plan.visibility,share,token:plan.share_token });
+}
+function publicPlan(plan) {
+    // Never expose share_token, participant identities or private completion/comments.
+    const { id,name,description,plan_date,start_time,end_time,timezone,place,tag,kind,
+        completion_mode,status,visibility } = plan;
+    return { id,name,description,plan_date,start_time,end_time,timezone,place,tag,kind,
+        completion_mode,status,visibility,is_owner:false,membership_status:"viewer" };
 }
 async function areContacts(supabase,one,two) {
     const { data: mine, error } = await supabase.from("chat_members")
@@ -181,11 +196,20 @@ export default function registerPlans(app,supabase) {
     });
 
     app.get("/plans/:id",auth,async(req,res) => {
-        if (!signedIn(req,res)) return;
         try {
-            const entry = await access(supabase,req.params.id,req.user.id);
-            if (!entry) return res.status(404).json({ success: false });
-            return res.json({ success: true, plan: await details(supabase,entry,req.user.id) });
+            const entry = req.user?.id ? await access(supabase,req.params.id,req.user.id) : null;
+            if (entry) {
+                const data = await details(supabase,entry,req.user.id);
+                if (!entry.owner) delete data.share_token;
+                return res.json({ success:true,plan:data });
+            }
+            if (!validId(req.params.id)) return res.status(404).json({ success:false });
+            const { data:plan,error } = await supabase.from("one_off_plans")
+                .select("*").eq("id",req.params.id).maybeSingle();
+            if (error) throw error;
+            if (!plan || !(await publicPlanAccess(supabase,plan,req.user?.id,req.query?.share)))
+                return res.status(404).json({ success:false });
+            return res.json({ success:true,plan:publicPlan(plan) });
         } catch(error) { return failed(res,error); }
     });
 
@@ -305,13 +329,13 @@ export default function registerPlans(app,supabase) {
                 .select("id").eq("nick",req.body.nick).maybeSingle();
             if (error) throw error;
             if (!target || target.id === req.user.id) return res.status(404).json({ success: false });
-            if (!await areContacts(supabase,req.user.id,target.id)) return res.status(403)
-                .json({ success:false,error:"Приглашать можно только контакты без блокировок" });
-            const { data: settings,error:settingsError } = await supabase.from("settings")
-                .select("private").eq("user_id",target.id).maybeSingle();
-            if (settingsError) throw settingsError;
-            const invites = settings?.private?.plan_invites ?? settings?.private?.activity_invites ?? "contacts";
-            if (invites === "nobody") return res.status(403).json({ success: false });
+            const { rules } = await ownerPrivacy(supabase,target.id);
+            const rel = await relationship(supabase,req.user.id,target.id);
+            const invites = rules.plan_invites || "contacts";
+            const allowed = permitted({ rules:{ ...rules,plan_invites:invites },field:"plan_invites",
+                viewerId:req.user.id,ownerId:target.id,contact:rel.contact,blocked:rel.blocked });
+            if (!allowed) return res.status(403)
+                .json({ success:false,error:"Приглашение запрещено настройками приватности" });
             const { data: existing,error: existingError } = await supabase.from("one_off_plan_members")
                 .select("status").eq("plan_id",entry.plan.id).eq("user_id",target.id).maybeSingle();
             if (existingError) throw existingError;

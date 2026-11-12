@@ -60,6 +60,7 @@ export default function (app, supabase) {
                 success: true,
                 order: data.order,
                 private: data.private,
+                profile_share_token: data.profile_share_token,
                 chat_welcome: data.chat_welcome ?? { enabled: false, text: "" },
                 quick_actions: Array.isArray(data.quick_actions) ? data.quick_actions : [],
                 group_invites: { contacts: data.group_invite_contacts ?? "message", others: data.group_invite_others ?? "none" },

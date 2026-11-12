@@ -1,4 +1,5 @@
 import { authenticateUser } from "../../middleware/token.js"
+import { validatePrivacy } from "../../utils/privacy.js";
 
 export default function (app, supabase) {
     app.post('/updatesettings', authenticateUser(supabase), async (req, res) => {
@@ -93,6 +94,17 @@ export default function (app, supabase) {
                 }, { onConflict: "user_id" });
                 if (error) throw error;
                 return res.json({ success: true });
+            }
+            if (setting === "private") {
+                const { data:current,error:loadError } = await supabase.from("settings")
+                    .select("private").eq("user_id",id).maybeSingle();
+                if (loadError) throw loadError;
+                const merged = validatePrivacy(value,current?.private || {});
+                if (!merged) return res.status(400).json({ success:false,error:"Некорректные настройки приватности" });
+                const { error } = await supabase.from("settings")
+                    .upsert({ user_id:id,private:merged },{ onConflict:"user_id" });
+                if (error) throw error;
+                return res.json({ success:true });
             }
             if (["all_note", "new_mess_note"].includes(setting) && typeof value !== "boolean") {
                 return res.status(400).json({ success: false, error: "Boolean preference required" });
