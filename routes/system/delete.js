@@ -15,17 +15,32 @@ export default function (app, supabase) {
 
         try {
             if (goal === "habit") {
-                const { data, error } = await supabase
-                    .from("habits")
-                    .delete()
-                    .eq("id", Number(delete_id))
-                    .eq("user_id", user_id)
-                    .select()
-                    .single();
-
-                if (error || !data) {
-                    return res.status(404).json({ success: false, message: "Привычка не найдена или нет доступа" });
+                const habitId = Number(delete_id);
+                if (!Number.isSafeInteger(habitId) || habitId <= 0) {
+                    return res.status(400).json({ success: false, message: "Некорректный ID активности" });
                 }
+                // Distinguish absent/not-owned from database failures. PostgREST
+                // delete().select().single() can fail on the response projection
+                // even though the authorized DELETE itself is valid.
+                const { data: owned, error: lookupError } = await supabase.from("habits")
+                    .select("id").eq("id", habitId).eq("user_id", user_id).maybeSingle();
+                if (lookupError) throw lookupError;
+                if (!owned) return res.status(404).json({
+                    success: false, message: "Привычка не найдена или нет доступа"
+                });
+                const { error, count } = await supabase.from("habits")
+                    .delete({ count: "exact" }).eq("id", habitId).eq("user_id", user_id);
+                if (error) {
+                    console.error("[delete habit] Database delete failed:", {
+                        habitId, code: error.code, details: error.details, message: error.message
+                    });
+                    return res.status(500).json({
+                        success: false, message: "Не удалось удалить активность. Ошибка базы данных."
+                    });
+                }
+                if (count !== 1) return res.status(403).json({
+                    success: false, message: "Удаление активности заблокировано правами доступа"
+                });
             }
             else if (goal === "chat") {
                 const { data: chatsUser1, error: err1 } = await supabase
