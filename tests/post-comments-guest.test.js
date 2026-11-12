@@ -27,7 +27,7 @@ function createDatabase(visibility) {
                         .filter(key => key in row).map(key => [key,row[key]])));
             const query = {
                 select(fields = "*") { columns = fields; return query; },
-                eq(key,value) { predicates.push(row => row[key] === value); return query; },
+                eq(key,value) { predicates.push(row => String(row[key]) === String(value)); return query; },
                 in(key,values) { predicates.push(row => values.includes(row[key])); return query; },
                 order() { return query; },
                 maybeSingle() { return Promise.resolve({ data: evaluate()[0] || null, error: null }); },
