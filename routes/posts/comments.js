@@ -10,7 +10,7 @@ export default function (app, supabase) {
         const postId = req.params.id;
 
         try {
-            if (!await readablePost(supabase, postId, req.user?.id)) return res.status(404).json({ success: false });
+            if (!await readablePost(supabase, postId, req.user?.id, req.query?.share)) return res.status(404).json({ success: false });
             // Получаем комментарии с id пользователя
             const { data: commentsData, error: commentsError } = await supabase
                 .from("posts_comments")
