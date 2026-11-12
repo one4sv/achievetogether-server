@@ -79,7 +79,7 @@ async function details(supabase,entry,userId) {
             kind: plan.kind, membership_status: "pending" };
     }
     const [membersResult,doneResult] = await Promise.all([
-        supabase.from("one_off_plan_members").select("user_id,status").eq("plan_id",plan.id),
+        supabase.from("one_off_plan_members").select("user_id,status,pinned").eq("plan_id",plan.id),
         supabase.from("one_off_plan_completions").select("user_id,completed_at").eq("plan_id",plan.id)
     ]);
     if (membersResult.error || doneResult.error) throw membersResult.error || doneResult.error;
@@ -92,6 +92,7 @@ async function details(supabase,entry,userId) {
     const statuses = new Map(memberships.map(m => [m.user_id,m.status]));
     const completed = new Set((doneResult.data || []).map(c => c.user_id));
     return { ...plan, is_owner: entry.owner, membership_status: entry.status,
+        pinned: Boolean((membersResult.data || []).find(m => m.user_id === userId)?.pinned),
         completed_for_me: plan.status === "completed" || completed.has(userId),
         completed_count: plan.status === "completed" ? activeIds.length : activeIds.filter(id => completed.has(id)).length,
         participants_count: activeIds.length,
@@ -121,7 +122,7 @@ export default function registerPlans(app,supabase) {
         try {
             const [owned,members] = await Promise.all([
                 supabase.from("one_off_plans").select("*").eq("owner_id",req.user.id).limit(200),
-                supabase.from("one_off_plan_members").select("plan_id,status").eq("user_id",req.user.id)
+                supabase.from("one_off_plan_members").select("plan_id,status,pinned").eq("user_id",req.user.id)
                     .in("status",["pending","accepted"]).limit(200)
             ]);
             if (owned.error || members.error) throw owned.error || members.error;
@@ -135,6 +136,7 @@ export default function registerPlans(app,supabase) {
                 extra = result.data || [];
             }
             const status = new Map((members.data || []).map(m => [String(m.plan_id),m.status]));
+            const pins = new Map((members.data || []).map(m => [String(m.plan_id),Boolean(m.pinned)]));
             const combined = [...own,...extra].map(p => {
                 const membership_status = p.owner_id === req.user.id ? "accepted" : status.get(String(p.id));
                 if (membership_status === "pending") {
@@ -142,7 +144,8 @@ export default function registerPlans(app,supabase) {
                         start_time: p.start_time, timezone: p.timezone,
                         kind: p.kind, membership_status };
                 }
-                return { ...p, membership_status, is_owner: p.owner_id === req.user.id };
+                return { ...p, membership_status, is_owner: p.owner_id === req.user.id,
+                    pinned: pins.get(String(p.id)) || false };
             }).sort((a,b) => a.plan_date.localeCompare(b.plan_date));
             const ids = combined.filter(p => p.membership_status === "accepted").map(p => p.id);
             let doneIds = new Set();
@@ -210,6 +213,24 @@ export default function registerPlans(app,supabase) {
                 .eq("id",entry.plan.id).eq("owner_id",req.user.id).select("*").single();
             if (error) throw error;
             return res.json({ success: true, plan:data });
+        } catch(error) { return failed(res,error); }
+    });
+
+    app.patch("/plans/:id/pin",auth,async(req,res) => {
+        if (!signedIn(req,res)) return;
+        if (typeof req.body?.pinned !== "boolean" || Object.keys(req.body).length !== 1)
+            return res.status(400).json({ success: false });
+        try {
+            const entry = await access(supabase,req.params.id,req.user.id);
+            if (!entry) return res.status(404).json({ success: false });
+            if (entry.status !== "accepted") return res.status(403).json({ success: false });
+            const { data, error } = await supabase.from("one_off_plan_members")
+                .update({ pinned: req.body.pinned }).eq("plan_id",entry.plan.id)
+                .eq("user_id",req.user.id).eq("status","accepted")
+                .select("pinned").maybeSingle();
+            if (error) throw error;
+            if (!data) return res.status(404).json({ success: false });
+            return res.json({ success: true, pinned: data.pinned });
         } catch(error) { return failed(res,error); }
     });
 
