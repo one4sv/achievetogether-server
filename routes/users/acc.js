@@ -105,8 +105,9 @@ export default function (app, supabase) {
       const { data:ownerPlans,error:planError } = await supabase.from("one_off_plans")
         .select("*").eq("owner_id",acc.id).order("plan_date",{ ascending:true }).limit(200);
       if (planError) throw planError;
-      const plans = (ownerPlans || []).filter(plan => canSee("plans",plan.share_token,plan.visibility))
-        .map(plan => ({ id:plan.id,name:plan.name,plan_date:plan.plan_date,start_time:plan.start_time,
+      const plans = (ownerPlans || []).filter(plan => canSee("plans",
+        plan.visibility === "inherit" && rules.plans === "link" ? privacy.token : plan.share_token,
+        plan.visibility)).map(plan => ({ id:plan.id,name:plan.name,plan_date:plan.plan_date,start_time:plan.start_time,
           end_time:plan.end_time,tag:plan.tag,kind:plan.kind,status:plan.status,
           visibility:plan.visibility,membership_status:"viewer",
           share:plan.visibility === "link" || plan.visibility === "inherit" && rules.plans === "link"

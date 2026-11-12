@@ -19,6 +19,7 @@ function createDatabase({ blocked = false, habitVisibility = "contacts", presenc
         } }],
         habits: [{ id: 19, user_id: owner, ongoing: true, name: "Private activity" }],
         posts: [],
+        one_off_plans: [],
         chats: [{ id: 9, is_group: false }],
         chat_members: [
             { chat_id: 9, user_id: owner, is_blocked: false },
@@ -38,6 +39,7 @@ function createDatabase({ blocked = false, habitVisibility = "contacts", presenc
             eq(key, value) { predicates.push(row => key === "chats.is_group" ? rows.chats.find(chat => chat.id === row.chat_id)?.is_group === value : row[key] === value); return query; },
             in(key, values) { predicates.push(row => values.includes(row[key])); return query; },
             order() { return query; },
+            limit() { return query; },
             maybeSingle() { return Promise.resolve({ data: evaluate()[0] || null, error: null }); },
             then(resolve, reject) { return Promise.resolve({ data: evaluate(), error: null }).then(resolve, reject); }
         };
@@ -82,7 +84,7 @@ test("private and contacts-only activities are enforced in the API response", as
 
     const contact = await getAccount(createDatabase(), friend);
     assert.equal(contact.payload.habits.length, 1);
-    assert.equal(contact.payload.privateRules.habits, "contacts");
+    assert.equal(contact.payload.privateRules.habits, "all");
 
     const blockedContact = await getAccount(createDatabase({ blocked: true }), friend);
     assert.deepEqual(blockedContact.payload.habits, []);

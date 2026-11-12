@@ -7,7 +7,7 @@ const base = { name: "One-time meeting", plan_date: "2026-11-20" };
 test("one-off plans accept date without time", () => {
     assert.deepEqual(validateOneOffPlanInput(base, true), {
         ...base, kind: "personal", completion_mode: "personal",
-        timezone: "Europe/Moscow", visibility: "nobody", join_mode: "invite"
+        timezone: "Europe/Moscow", visibility: "inherit", join_mode: "invite"
     });
 });
 test("invalid dates and time formats are rejected", () => {
@@ -101,10 +101,10 @@ test("a pending invite cannot read private description before accepting", async 
     assert.equal(result.payload.plan.membership_status,"pending");
     assert.equal(Object.hasOwn(result.payload.plan,"description"),false);
 });
-test("unauthenticated requests are rejected before database reads", async () => {
+test("anonymous visitors do not see private plans", async () => {
     const app = mockedPlanServer();
     const result = await callPlanRoute(app,"GET","/plans/:id",null);
-    assert.equal(result.status,401);
+    assert.equal(result.status,404);
     assert.equal(app.getWrites(),0);
 });
 
@@ -181,6 +181,7 @@ test("owner invitation upgrades a personal plan, exposes pending status only to 
             { id: owner, nick: "owner", username: "Owner", avatar_url: null },
             { id: targetId, nick: "target", username: "Target", avatar_url: null }
         ],
+        chats: [{ id:12, is_group:false }],
         chat_members: [
             { chat_id: 12, user_id: owner, is_blocked: false, "chats.is_group": false },
             { chat_id: 12, user_id: targetId, is_blocked: false, "chats.is_group": false }

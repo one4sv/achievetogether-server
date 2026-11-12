@@ -108,7 +108,11 @@ async function publicPlanAccess(supabase,plan,userId,share) {
     const relation = await relationship(supabase,userId,plan.owner_id);
     return permitted({ rules:owner.rules,field:"plans",viewerId:userId,ownerId:plan.owner_id,
         contact:relation.contact,blocked:relation.blocked,
-        override:plan.visibility,share,token:plan.share_token });
+        override:plan.visibility,share,token:plan.share_token }) ||
+        (plan.visibility === "inherit" && owner.rules.plans === "link" &&
+            permitted({ rules:owner.rules,field:"plans",viewerId:userId,ownerId:plan.owner_id,
+                contact:relation.contact,blocked:relation.blocked,
+                override:plan.visibility,share,token:owner.token }));
 }
 function publicPlan(plan) {
     // Never expose share_token, participant identities or private completion/comments.
@@ -159,7 +163,8 @@ export default function registerPlans(app,supabase) {
                         start_time: p.start_time, timezone: p.timezone,
                         kind: p.kind, membership_status };
                 }
-                return { ...p, membership_status, is_owner: p.owner_id === req.user.id,
+                return { ...p,share_token:p.owner_id === req.user.id ? p.share_token : undefined,
+                    membership_status, is_owner: p.owner_id === req.user.id,
                     pinned: pins.get(String(p.id)) || false };
             }).sort((a,b) => a.plan_date.localeCompare(b.plan_date));
             const ids = combined.filter(p => p.membership_status === "accepted").map(p => p.id);
