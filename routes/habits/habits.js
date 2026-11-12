@@ -95,6 +95,66 @@ export default function (app, supabase) {
         }
     });
 
+    // Aggregate only habits visible to the requester; never expose other users' identities.
+    // The selected date may be different from today in the calendar and SideMenu.
+    app.get("/habits/day-progress", authenticateUser(supabase), async (req, res) => {
+        const userId = req.user?.id;
+        const date = req.query?.date;
+        if (!userId) return res.status(401).json({ success: false });
+        if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ success: false, error: "Некорректная дата" });
+        }
+        try {
+            const { data: joined, error: joinedError } = await supabase.from("habit_members")
+                .select("habit_id").eq("user_id", userId).eq("status", "accepted");
+            if (joinedError) throw joinedError;
+            const acceptedIds = (joined || []).map(member => member.habit_id);
+            const { data: allHabits, error: habitsError } = await supabase.from("habits")
+                .select("id, user_id, chat_id, completion_mode")
+                .or(`user_id.eq.${userId}${acceptedIds.length ? `,id.in.(${acceptedIds.join(",")})` : ""}`);
+            if (habitsError) throw habitsError;
+            const habits = await filterBlockedHabitMemberships(supabase, allHabits || [], userId);
+            if (!habits.length) return res.json({ success: true, date, progress: {} });
+
+            const ids = habits.map(habit => habit.id);
+            const { data: members, error: membersError } = await supabase.from("habit_members")
+                .select("habit_id, user_id, status").in("habit_id", ids).eq("status", "accepted");
+            if (membersError) throw membersError;
+            const chatIds = [...new Set(habits.map(habit => habit.chat_id).filter(Boolean))];
+            let chatMembers = [];
+            if (chatIds.length) {
+                const { data, error } = await supabase.from("chat_members")
+                    .select("chat_id, user_id, is_blocked").in("chat_id", chatIds);
+                if (error) throw error;
+                chatMembers = data || [];
+            }
+            const { data: completions, error: completionsError } = await supabase.from("habit_completions")
+                .select("habit_id, user_id").in("habit_id", ids).eq("completed_at", date);
+            if (completionsError) throw completionsError;
+            const progress = {};
+            for (const habit of habits) {
+                const participants = new Set([habit.user_id]);
+                for (const member of members || []) {
+                    if (member.habit_id === habit.id) participants.add(member.user_id);
+                }
+                for (const member of chatMembers) {
+                    if (member.chat_id === habit.chat_id && !member.is_blocked) participants.add(member.user_id);
+                }
+                const doneUsers = new Set((completions || []).filter(item => item.habit_id === habit.id)
+                    .map(item => item.user_id));
+                const total = participants.size;
+                const completed = habit.completion_mode === "shared"
+                    ? (doneUsers.has(habit.user_id) ? total : 0)
+                    : [...participants].filter(id => doneUsers.has(id)).length;
+                progress[habit.id] = { completed, total };
+            }
+            return res.json({ success: true, date, progress });
+        } catch (error) {
+            console.error("Ошибка прогресса участников активностей:", error);
+            return res.status(500).json({ success: false, error: "Не удалось загрузить прогресс участников" });
+        }
+    });
+
     app.get("/habits/:id", authenticateUser(supabase), async (req, res) => {
         const currentUserId = req.user?.id || null;
         const { id: habitId } = req.params;
