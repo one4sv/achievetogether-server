@@ -1,4 +1,5 @@
 import { inviteGroupUsers, personalInvitation, invitationError } from "../../services/groupInvitations.js";
+import { inviteJoinedGroupMemberToPlans } from "../../services/planChatLink.js";
 import { authenticateUser } from "../../middleware/token.js";
 import multer from "multer"; // ← добавьте импорт
 import crypto from "crypto";
@@ -311,6 +312,14 @@ export default function (app, supabase) {
           await supabase.from("chat_members").delete().eq("chat_id", chatId).eq("user_id", userId);
           throw attachError;
         }
+      }
+
+      // Group membership must not silently grant a user's plan completion
+      // rights. Offer pending plan invitations respecting invite privacy.
+      try {
+        await inviteJoinedGroupMemberToPlans(supabase, chatId, userId);
+      } catch (error) {
+        console.error("[group join] Failed to invite member to linked plans:", error);
       }
 
       // Подгружаем имя присоединившегося
