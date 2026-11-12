@@ -77,7 +77,7 @@ export default function (app, supabase) {
         .order("created_at", { ascending: false })
         .limit(100);
 
-      const safePosts = await signedRows(supabase, await visiblePosts(supabase, postsData || [], req.user?.id), "media", "posts");
+      const safePosts = await signedRows(supabase, await visiblePosts(supabase, postsData || [], req.user?.id, req.query?.share), "media", "posts");
 
       // --- 8) пользователи
       const postUserIds = [...new Set(safePosts.map(p => p.user_id))];

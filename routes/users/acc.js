@@ -1,6 +1,7 @@
 import { visiblePosts, signedRows } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { isUserOnline } from "../../realtime/ws.js";
+import { relationship,ownerPrivacy,permitted,defaults } from "../../utils/privacy.js";
 
 async function canViewProfilePresence(supabase, viewerId, subjectId) {
   if (!viewerId) return false;
@@ -46,20 +47,21 @@ export default function (app, supabase) {
       if (settingsError) throw settingsError;
 
       const showArchived = settingsData?.show_archived_in_acc ?? false;
-      const privacy = settingsData?.private && typeof settingsData.private === "object"
-        ? settingsData.private : {};
-      const rules = { number: "nobody", mail: "nobody", habits: "all", posts: "all", ...privacy };
-      let isContact = req.user?.id === acc.id;
-      if (!isContact && req.user?.id && Object.values(rules).includes("contacts")) {
-        isContact = (await visiblePosts(supabase,
-          [{ user_id: acc.id, visibility: "contacts" }], req.user.id)).length > 0;
-      }
-      const privateRules = { ...rules };
-      if (!isContact) {
-        for (const key of ["number", "mail", "habits", "posts"]) {
-          if (privateRules[key] === "contacts") privateRules[key] = "nobody";
-        }
-      }
+      const privacy = await ownerPrivacy(supabase, acc.id);
+      const rules = { ...defaults,...privacy.rules };
+      const rel = await relationship(supabase,req.user?.id,acc.id);
+      const canSee = (field,token = privacy.token,override = null) =>
+        permitted({ rules,field,ownerId:acc.id,viewerId:req.user?.id,contact:rel.contact,
+          blocked:rel.blocked,share:req.query?.share,token,override });
+      const canSeeProfile = canSee("profile");
+      const privateRules = {
+        number:"nobody",mail:"nobody",
+        profile:canSeeProfile ? "all" : "nobody",
+        habits:canSee("habits") ? "all" : "nobody",
+        posts:canSee("posts") ? "all" : "nobody",
+        plans:canSee("plans") ? "all" : "nobody"
+      };
+      const isContact = rel.contact || req.user?.id === acc.id;
 
       const presenceRule = rules.presence || "all";
       const canShowPresence = (req.user?.id === acc.id || presenceRule === "all"
@@ -67,6 +69,10 @@ export default function (app, supabase) {
         && await canViewProfilePresence(supabase, req.user?.id, acc.id);
       const publicAcc = {
         ...acc,
+        bio:canSeeProfile ? acc.bio : null,
+        date_of_birth:canSeeProfile ? acc.date_of_birth : null,
+        sex:canSeeProfile ? acc.sex : null,
+        registration_date:canSeeProfile ? acc.registration_date : null,
         last_online: canShowPresence ? acc.last_online : null,
         is_online: canShowPresence && isUserOnline(acc.id),
         can_view_presence: canShowPresence
@@ -82,7 +88,7 @@ export default function (app, supabase) {
       }
 
       let habits = [];
-      if (req.user?.id === acc.id || privateRules.habits !== "nobody") {
+      if (canSee("habits")) {
         const { data, error: habitsError } = await habitsQuery;
         if (habitsError) throw habitsError;
         habits = data || [];
@@ -96,12 +102,22 @@ export default function (app, supabase) {
 
       if (postsError) throw postsError;
 
+      const { data:ownerPlans,error:planError } = await supabase.from("one_off_plans")
+        .select("*").eq("owner_id",acc.id).order("plan_date",{ ascending:true }).limit(200);
+      if (planError) throw planError;
+      const plans = (ownerPlans || []).filter(plan => canSee("plans",plan.share_token,plan.visibility))
+        .map(plan => ({ id:plan.id,name:plan.name,plan_date:plan.plan_date,start_time:plan.start_time,
+          end_time:plan.end_time,tag:plan.tag,kind:plan.kind,status:plan.status,
+          visibility:plan.visibility,membership_status:"viewer",
+          share:plan.visibility === "link" || plan.visibility === "inherit" && rules.plans === "link"
+            ? req.query?.share : null }));
       return res.json({
         success: true,
         acc: publicAcc,
         habits: habits || [],
+        plans,
         privateRules,
-        posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id), "media", "posts"),
+        posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id, req.query?.share), "media", "posts"),
       });
     } catch (err) {
       console.error("Ошибка при получении аккаунта:", err);

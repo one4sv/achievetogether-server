@@ -1,4 +1,6 @@
-export const visibilityValues = ["inherit", "all", "contacts", "nobody"];
+import { relationship,permitted,defaults } from "./privacy.js";
+
+export const visibilityValues = ["inherit", "all", "contacts", "nobody", "link"];
 
 export function parseArray(value) {
     if (typeof value === "string") value = JSON.parse(value);
@@ -50,44 +52,33 @@ export function validateContent(value, media) {
     return visit(document);
 }
 
-export async function visiblePosts(supabase, posts, viewer) {
+export async function visiblePosts(supabase, posts, viewer, share = null) {
     if (!posts.length) return [];
     const authors = [...new Set(posts.map(post => post.user_id))];
-    const { data: settings, error } = await supabase.from("settings")
-        .select("user_id,private").in("user_id", authors);
+    const { data: settings,error } = await supabase.from("settings")
+        .select("user_id,private,profile_share_token").in("user_id",authors);
     if (error) throw error;
-    const defaults = new Map((settings || []).map(row => [row.user_id, row.private?.posts || "all"]));
-    const visibility = post => post.visibility && post.visibility !== "inherit"
-        ? post.visibility : defaults.get(post.user_id) || "all";
-    const contacts = new Set();
-    if (viewer && posts.some(post => post.user_id !== viewer && visibility(post) === "contacts")) {
-        const { data: memberships, error: memberError } = await supabase.from("chat_members")
-            .select("chat_id").eq("user_id", viewer).eq("is_blocked", false);
-        if (memberError) throw memberError;
-        const chatIds = (memberships || []).map(row => row.chat_id);
-        if (chatIds.length) {
-            const { data: chats, error: chatError } = await supabase.from("chats")
-                .select("id").in("id", chatIds).eq("is_group", false);
-            if (chatError) throw chatError;
-            const personalIds = (chats || []).map(row => row.id);
-            if (personalIds.length) {
-                const { data: members, error: contactError } = await supabase.from("chat_members")
-                    .select("user_id").in("chat_id", personalIds).in("user_id", authors).eq("is_blocked", false);
-                if (contactError) throw contactError;
-                (members || []).forEach(row => contacts.add(row.user_id));
-            }
-        }
+    const byOwner = new Map((settings || []).map(row => [row.user_id,row]));
+    const access = new Map();
+    for (const author of authors) {
+        if (viewer && viewer === author) continue;
+        access.set(author,await relationship(supabase,viewer,author));
     }
-    return posts.filter(post => post.user_id === viewer || visibility(post) === "all"
-        || (visibility(post) === "contacts" && contacts.has(post.user_id)));
+    return posts.filter(post => {
+        const row = byOwner.get(post.user_id);
+        const rel = access.get(post.user_id) || { contact:false,blocked:false };
+        return permitted({ rules:{ ...defaults,...row?.private },field:"posts",
+            viewerId:viewer,ownerId:post.user_id,contact:rel.contact,blocked:rel.blocked,
+            token:row?.profile_share_token,share,override:post.visibility });
+    });
 }
 
-export async function readablePost(supabase, id, viewer) {
-    if (!/^\d+$/.test(String(id))) return null;
-    const { data: post, error } = await supabase.from("posts").select("*").eq("id", id).maybeSingle();
+export async function readablePost(supabase, id, viewer, share = null) {
+    if (!/^\\d+$/.test(String(id))) return null;
+    const { data: post,error } = await supabase.from("posts").select("*").eq("id",id).maybeSingle();
     if (error) throw error;
     if (!post) return null;
-    return (await visiblePosts(supabase, [post], viewer))[0] || null;
+    return (await visiblePosts(supabase,[post],viewer,share))[0] || null;
 }
 
 export async function signedMedia(supabase, value, bucket) {

@@ -208,7 +208,7 @@ export default function (app, supabase) {
                 red_counter_left: counterSetRaw.red_counter_left !== null ? Number(counterSetRaw.red_counter_left) : null,
             } : null;
 
-            const access = await getHabitAccess(supabase, habit.id, currentUserId);
+            const access = await getHabitAccess(supabase, habit.id, currentUserId, req.query?.share);
             if (!access?.can_view) return res.status(403).json({ success: false, error: "Нет доступа к активности" });
             const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Moscow" });
             const startOfDay = new Date(`${today}T00:00:00+03:00`).toISOString();

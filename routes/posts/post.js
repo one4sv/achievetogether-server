@@ -31,7 +31,7 @@ export default function postRoute(app, supabase) {
                     error: settingsError
                 } = await supabase.from("settings").select("private").eq("user_id", post.user_id).maybeSingle();
                 if (settingsError) throw settingsError;
-                if (!(await visiblePosts(supabase, [post], req.user?.id)).length) {
+                if (!(await visiblePosts(supabase, [post], req.user?.id, req.query?.share)).length) {
                     return res.status(404).json({ success: false });
                 }
                 const {

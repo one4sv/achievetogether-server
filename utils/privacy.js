@@ -19,10 +19,10 @@ export async function ownerPrivacy(supabase,ownerId) {
 export async function relationship(supabase,viewerId,ownerId) {
     if (!viewerId || !ownerId || viewerId === ownerId) return { contact:false,blocked:false };
     const { data: mine,error } = await supabase.from("chat_members")
-        .select("chat_id,is_blocked").eq("user_id",viewerId).limit(500);
+        .select("chat_id,is_blocked").eq("user_id",viewerId);
     if (error) throw error;
     if (!mine?.length) return { contact:false,blocked:false };
-    const ids = mine.map(row => row.chat_id);
+    const ids = mine.slice(0,500).map(row => row.chat_id);
     const [{ data: theirs,error:otherError },{ data:chats,error:chatError }] = await Promise.all([
         supabase.from("chat_members").select("chat_id,is_blocked").eq("user_id",ownerId).in("chat_id",ids),
         supabase.from("chats").select("id").eq("is_group",false).in("id",ids)

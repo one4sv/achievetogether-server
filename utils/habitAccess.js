@@ -1,6 +1,7 @@
 import { moscowDate } from "./habitCompletionDate.js";
+import { ownerPrivacy,relationship,permitted } from "./privacy.js";
 
-export async function getHabitAccess(supabase, habitId, userId) {
+export async function getHabitAccess(supabase, habitId, userId, share = null) {
     const { data: habit, error } = await supabase.from("habits").select("*").eq("id", habitId).maybeSingle();
     if (error) throw error;
     if (!habit) return null;
@@ -30,24 +31,14 @@ export async function getHabitAccess(supabase, habitId, userId) {
     }
     let canView = !!permissions?.is_member;
     if (!canView) {
-        const { data: settings, error: settingsError } = await supabase.from("settings")
-            .select("private, show_archived_in_acc").eq("user_id", habit.user_id).maybeSingle();
+        const [{ data:settings,error:settingsError },privacy] = await Promise.all([
+            supabase.from("settings").select("show_archived_in_acc").eq("user_id",habit.user_id).maybeSingle(),
+            ownerPrivacy(supabase,habit.user_id)
+        ]);
         if (settingsError) throw settingsError;
-        const visibility = settings?.private?.habits || "all";
-        canView = visibility === "all";
-        if (visibility === "contacts" && userId) {
-            const { data: myChats, error: myError } = await supabase.from("chat_members")
-                .select("chat_id").eq("user_id", userId).eq("is_blocked", false);
-            if (myError) throw myError;
-            const ids = (myChats || []).map(item => item.chat_id);
-            if (ids.length) {
-                const { data: ownerChats, error: ownerError } = await supabase.from("chat_members")
-                    .select("chat_id, chats!inner(is_group)").eq("user_id", habit.user_id)
-                    .eq("is_blocked", false).in("chat_id", ids).eq("chats.is_group", false).limit(1);
-                if (ownerError) throw ownerError;
-                canView = !!ownerChats?.length;
-            }
-        }
+        const rel = await relationship(supabase,userId,habit.user_id);
+        canView = permitted({ rules:privacy.rules,field:"habits",viewerId:userId,ownerId:habit.user_id,
+            contact:rel.contact,blocked:rel.blocked,share,token:privacy.token });
         if (!habit.ongoing && !settings?.show_archived_in_acc) canView = false;
     }
     return {
