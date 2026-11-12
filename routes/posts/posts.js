@@ -1,4 +1,5 @@
 import { visiblePosts, signedRows } from "../../utils/postContent.js";
+import { visibleHabitIds } from "../../utils/privacy.js";
 // routes/postsAndFeed.js
 import multer from "multer";
 import { authenticateUser } from "../../middleware/token.js";
@@ -102,7 +103,8 @@ export default function (app, supabase) {
           .select("*")
           .in("id", habitIds);
 
-        habitById = (habitsData || []).reduce((acc, h) => {
+        const ids = await visibleHabitIds(supabase,habitsData || [],userId);
+        habitById = (habitsData || []).filter(habit => ids.has(String(habit.id))).reduce((acc, h) => {
           acc[h.id] = h;
           return acc;
         }, {});
@@ -209,7 +211,8 @@ export default function (app, supabase) {
 
         if (habitsErr) throw habitsErr;
         const safeHabits = Array.isArray(habitsData) ? habitsData : [];
-        habitById = safeHabits.reduce((acc, h) => {
+        const ids = await visibleHabitIds(supabase,safeHabits,req.user?.id,req.query?.share);
+        habitById = safeHabits.filter(habit => ids.has(String(habit.id))).reduce((acc, h) => {
           acc[String(h.id)] = h;
           return acc;
         }, {});

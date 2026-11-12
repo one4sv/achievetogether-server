@@ -1,5 +1,6 @@
 import { visiblePosts, signedMedia } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
+import { visibleHabitIds } from "../../utils/privacy.js";
 const array = value => {
     try {
         const parsed = typeof value === "string" ? JSON.parse(value) : value;
@@ -26,11 +27,6 @@ export default function postRoute(app, supabase) {
                 if (!post) return res.status(404).json({
                     success: false
                 });
-                const {
-                    data: settings,
-                    error: settingsError
-                } = await supabase.from("settings").select("private").eq("user_id", post.user_id).maybeSingle();
-                if (settingsError) throw settingsError;
                 if (!(await visiblePosts(supabase, [post], req.user?.id, req.query?.share)).length) {
                     return res.status(404).json({ success: false });
                 }
@@ -44,10 +40,11 @@ export default function postRoute(app, supabase) {
                 });
                 // Habit content has independent privacy. Do not expose it through a post.
                 let habit = null;
-                if (post.habit_id && (req.user?.id === post.user_id || settings?.private?.habits === "all")) {
+                if (post.habit_id) {
                     const result = await supabase.from("habits").select("*").eq("id", post.habit_id).eq("user_id", post.user_id).maybeSingle();
                     if (result.error) throw result.error;
-                    habit = result.data;
+                    if (result.data && (await visibleHabitIds(supabase,[result.data],req.user?.id,req.query?.share)).has(String(result.data.id)))
+                        habit = result.data;
                 }
                 res.json(
                     {

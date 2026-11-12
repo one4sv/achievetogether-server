@@ -76,3 +76,25 @@ export function validatePrivacy(body,old = {}) {
     }
     return rules;
 }
+
+
+export async function visibleHabitIds(supabase,habits,viewerId,share = null) {
+    const allowed = new Set();
+    const owners = new Map();
+    for (const habit of habits || []) {
+        if (!owners.has(habit.user_id)) owners.set(habit.user_id,[]);
+        owners.get(habit.user_id).push(habit.id);
+    }
+    for (const [ownerId,ids] of owners) {
+        if (ownerId === viewerId) {
+            ids.forEach(id => allowed.add(String(id)));
+            continue;
+        }
+        const privacy = await ownerPrivacy(supabase,ownerId);
+        const rel = await relationship(supabase,viewerId,ownerId);
+        if (permitted({ rules:privacy.rules,field:"habits",viewerId,ownerId,
+            contact:rel.contact,blocked:rel.blocked,token:privacy.token,share }))
+            ids.forEach(id => allowed.add(String(id)));
+    }
+    return allowed;
+}
