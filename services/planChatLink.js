@@ -78,3 +78,34 @@ export async function linkPlanToGroup(supabase, planId, chatId, ownerId) {
     }
     return { chat_id: chatId, invited: invites.length };
 }
+
+
+/** Called after a user joins a group already linked to one or more plans. */
+export async function inviteJoinedGroupMemberToPlans(supabase, chatId, userId) {
+    const { data: settings, error: privacyError } = await supabase.from("settings")
+        .select("private").eq("user_id", userId).maybeSingle();
+    if (privacyError) throw privacyError;
+    const privateSettings = settings?.private || {};
+    if ((privateSettings.plan_invites ?? privateSettings.activity_invites) === "nobody") return 0;
+    const { data: plans, error: plansError } = await supabase.from("one_off_plans")
+        .select("id,owner_id").eq("chat_id", chatId).eq("status", "upcoming");
+    if (plansError) throw plansError;
+    if (!plans?.length) return 0;
+    const ids = plans.filter(plan => plan.owner_id !== userId).map(plan => plan.id);
+    if (!ids.length) return 0;
+    const { data: existing, error: membersError } = await supabase.from("one_off_plan_members")
+        .select("plan_id,status").eq("user_id", userId).in("plan_id", ids);
+    if (membersError) throw membersError;
+    const already = new Set((existing || [])
+        .filter(member => member.status === "pending" || member.status === "accepted")
+        .map(member => String(member.plan_id)));
+    const candidates = plans.filter(plan => plan.owner_id !== userId && !already.has(String(plan.id)));
+    if (!candidates.length) return 0;
+    const { error } = await supabase.from("one_off_plan_members")
+        .upsert(candidates.map(plan => ({
+            plan_id: plan.id, user_id: userId, invited_by: plan.owner_id,
+            status: "pending", joined_at: null
+        })), { onConflict: "plan_id,user_id" });
+    if (error) throw error;
+    return candidates.length;
+}
