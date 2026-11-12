@@ -110,7 +110,7 @@ export default function (app, supabase) {
             if (joinedError) throw joinedError;
             const acceptedIds = (joined || []).map(member => member.habit_id);
             const { data: allHabits, error: habitsError } = await supabase.from("habits")
-                .select("id, user_id, chat_id, completion_mode")
+                .select("id, user_id, chat_id, chat_participation_mode, completion_mode")
                 .or(`user_id.eq.${userId}${acceptedIds.length ? `,id.in.(${acceptedIds.join(",")})` : ""}`);
             if (habitsError) throw habitsError;
             const habits = await filterBlockedHabitMemberships(supabase, allHabits || [], userId);
@@ -137,8 +137,10 @@ export default function (app, supabase) {
                 for (const member of members || []) {
                     if (member.habit_id === habit.id) participants.add(member.user_id);
                 }
-                for (const member of chatMembers) {
-                    if (member.chat_id === habit.chat_id && !member.is_blocked) participants.add(member.user_id);
+                if (habit.chat_participation_mode !== "optional") {
+                    for (const member of chatMembers) {
+                        if (member.chat_id === habit.chat_id && !member.is_blocked) participants.add(member.user_id);
+                    }
                 }
                 const doneUsers = new Set((completions || []).filter(item => item.habit_id === habit.id)
                     .map(item => item.user_id));
