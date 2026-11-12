@@ -83,6 +83,22 @@ export default function (app, supabase) {
         .select("*")
         .eq("chat_id", groupId);
 
+      // Linked plans are visible in this chat only to their owners or users
+      // who separately accepted the plan invitation.
+      const { data: linkedPlans, error: plansError } = await supabase.from("one_off_plans")
+        .select("id,name,plan_date,tag,status,owner_id").eq("chat_id", groupId);
+      if (plansError) throw plansError;
+      const planIds = (linkedPlans || []).map(plan => plan.id);
+      const { data: myPlanMembership, error: membershipError } = planIds.length
+        ? await supabase.from("one_off_plan_members")
+          .select("plan_id").in("plan_id", planIds).eq("user_id", userId).eq("status", "accepted")
+        : { data: [], error: null };
+      if (membershipError) throw membershipError;
+      const allowedPlans = new Set((myPlanMembership || []).map(item => String(item.plan_id)));
+      const plans = (linkedPlans || []).filter(plan =>
+        plan.owner_id === userId || allowedPlans.has(String(plan.id)))
+        .map(({ owner_id, ...plan }) => plan);
+
       // 5. Медиа-файлы из сообщений группы (все файлы, newest first, как в /acc/:nick)
       const { data: messageIdsData } = await supabase
         .from("messages")
@@ -122,6 +138,7 @@ export default function (app, supabase) {
           invite_expires_at: group.invite_expires_at || null,
         },
         habits: habits || [],
+        plans,
         members,
         media,
         my_perms:myPerms
