@@ -70,6 +70,8 @@ async function access(supabase,id,userId) {
         .select("status").eq("plan_id",id).eq("user_id",userId).maybeSingle();
     if (memberError) throw memberError;
     if (!member || member.status === "declined") return null;
+    const rel = await relationship(supabase,userId,plan.owner_id);
+    if (rel.blocked) return null;
     return { plan, owner: false, status: member.status };
 }
 async function details(supabase,entry,userId) {
