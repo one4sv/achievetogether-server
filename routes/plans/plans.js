@@ -1,4 +1,5 @@
 import { authenticateUser } from "../../middleware/token.js";
+import { linkPlanToGroup } from "../../services/planChatLink.js";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -254,6 +255,20 @@ export default function registerPlans(app,supabase) {
             if (error) throw error;
             return res.json({ success: true });
         } catch(error) { return failed(res,error); }
+    });
+
+    app.patch("/plans/:id/chat",auth,async(req,res) => {
+        if (!signedIn(req,res)) return;
+        const chatId = Number(req.body?.chat_id);
+        if (!Number.isSafeInteger(chatId) || chatId <= 0)
+            return res.status(400).json({ success:false,error:"Выберите групповую беседу" });
+        try {
+            const result = await linkPlanToGroup(supabase, req.params.id, chatId, req.user.id);
+            return res.json({ success:true,...result });
+        } catch(error) {
+            if (error.status) return res.status(error.status).json({ success:false,error:error.message });
+            return failed(res,error);
+        }
     });
 
     app.post("/plans/:id/invite",auth,async(req,res) => {
