@@ -65,6 +65,7 @@ export default function registerAllRoutes(app, supabase) {
     planRoutes(app, supabase);
     planReminderRoutes(app, supabase);
 
+    registerRoutes(app, supabase);
     authRoutes(app, supabase);
     accountSecurityRoutes(app, supabase);
     passwordRoutes(app, supabase);
