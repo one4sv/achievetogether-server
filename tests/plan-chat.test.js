@@ -6,7 +6,7 @@ const owner = "11111111-1111-4111-8111-111111111111";
 const participant = "22222222-2222-4222-8222-222222222222";
 const stranger = "33333333-3333-4333-8333-333333333333";
 
-function fixture({ blocked = false, denyInvites = false, existingChat = null } = {}) {
+function fixture({ blocked = false, denyInvites = false, inviteRule = "all", existingChat = null } = {}) {
     const rows = {
         one_off_plans: [{ id: 7, owner_id: owner, chat_id: existingChat, kind: "personal", status: "upcoming" }],
         chats: [{ id: 10, is_group: true }, { id: 11, is_group: true }],
@@ -15,7 +15,7 @@ function fixture({ blocked = false, denyInvites = false, existingChat = null } =
             { chat_id: 10, user_id: participant, is_blocked: blocked }
         ],
         one_off_plan_members: [{ plan_id: 7, user_id: owner, status: "accepted" }],
-        settings: [{ user_id: participant, private: { plan_invites: denyInvites ? "nobody" : "all" } }]
+        settings: [{ user_id: participant, private: { plan_invites: denyInvites ? "nobody" : inviteRule } }]
     };
     let writes = 0;
     const supabase = { async rpc(name, args) {
@@ -102,4 +102,11 @@ test("linking a plan to a different group is rejected without mutations", async 
     const { supabase, getWrites } = fixture({ existingChat: 11 });
     await assert.rejects(() => linkPlanToGroup(supabase, 7, 10, owner), { status: 409 });
     assert.equal(getWrites(), 0);
+});
+
+test("group membership alone does not satisfy contact-only plan invitation privacy", async () => {
+    const { rows, supabase } = fixture({ inviteRule: "contacts" });
+    const result = await linkPlanToGroup(supabase, 7, 10, owner);
+    assert.equal(result.invited, 0);
+    assert.equal(rows.one_off_plan_members.length, 1);
 });
