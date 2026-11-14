@@ -1,4 +1,5 @@
 import { sendPlanInvitation, publishPlanInvitation } from "./planInvitations.js";
+import { ownerPrivacy, relationship, permitted } from "../utils/privacy.js";
 
 // Shared by /plans/:id/chat and the existing CreateChat flow.
 // A linked group never gets private plan access implicitly: its members
@@ -40,18 +41,15 @@ export async function linkPlanToGroup(supabase, planId, chatId, ownerId) {
     const candidates = [...new Set(members.map(m => m.user_id))]
         .filter(userId => userId !== ownerId && !already.has(userId));
 
-    let invites = [];
-    if (candidates.length) {
-        const { data: settings, error: settingsError } = await supabase.from("settings")
-            .select("user_id,private").in("user_id", candidates);
-        if (settingsError) throw settingsError;
-        const settingsById = new Map((settings || []).map(item => [item.user_id, item.private]));
-        invites = candidates.filter(id =>
-            (settingsById.get(id)?.plan_invites ?? settingsById.get(id)?.activity_invites) !== "nobody")
-            .map(userId => ({
-                plan_id: plan.id, user_id: userId, invited_by: ownerId,
-                status: "pending", joined_at: null
-            }));
+    const invites = [];
+    for (const userId of candidates) {
+        const [privacy, rel] = await Promise.all([
+            ownerPrivacy(supabase,userId), relationship(supabase,ownerId,userId)
+        ]);
+        if (permitted({ rules:privacy.rules,field:"plan_invites",
+            viewerId:ownerId,ownerId:userId,contact:rel.contact,blocked:rel.blocked })) {
+            invites.push({ user_id:userId });
+        }
     }
 
     const changed = !plan.chat_id || plan.kind !== "shared";
@@ -88,11 +86,6 @@ export async function linkPlanToGroup(supabase, planId, chatId, ownerId) {
 
 /** Called after a user joins a group already linked to one or more plans. */
 export async function inviteJoinedGroupMemberToPlans(supabase, chatId, userId) {
-    const { data: settings, error: privacyError } = await supabase.from("settings")
-        .select("private").eq("user_id", userId).maybeSingle();
-    if (privacyError) throw privacyError;
-    const privateSettings = settings?.private || {};
-    if ((privateSettings.plan_invites ?? privateSettings.activity_invites) === "nobody") return 0;
     const { data: plans, error: plansError } = await supabase.from("one_off_plans")
         .select("id,owner_id").eq("chat_id", chatId).eq("status", "upcoming");
     if (plansError) throw plansError;
@@ -108,7 +101,11 @@ export async function inviteJoinedGroupMemberToPlans(supabase, chatId, userId) {
     const candidates = plans.filter(plan => plan.owner_id !== userId && !already.has(String(plan.id)));
     if (!candidates.length) return 0;
     let invited = 0;
+    const privacy = await ownerPrivacy(supabase,userId);
     for (const plan of candidates) {
+        const rel = await relationship(supabase,plan.owner_id,userId);
+        if (!permitted({ rules:privacy.rules,field:"plan_invites",
+            viewerId:plan.owner_id,ownerId:userId,contact:rel.contact,blocked:rel.blocked })) continue;
         const result = await sendPlanInvitation(supabase,plan.owner_id,plan.id,userId);
         if (!result.already_invited && !result.already_member) invited++;
     }
