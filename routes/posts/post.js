@@ -55,7 +55,7 @@ export default function postRoute(app, supabase) {
                             text: post.text ?? "",
                             content: post.content ?? null,
                             visibility: post.visibility ?? "inherit",
-                            media: await signedMedia(supabase, post.media, "posts"),
+                            media: signedMedia(supabase, post.media, "posts", post.id, req.query?.share),
                             likes: array(post.likes),
                             habit,
                             created_at: post.created_at,

@@ -82,38 +82,25 @@ export async function readablePost(supabase, id, viewer, share = null) {
     return (await visiblePosts(supabase,[post],viewer,share))[0] || null;
 }
 
-export async function signedMedia(supabase, value, bucket) {
-    const media = parseArray(value).map(file => ({
+// Keep the existing API schema, but never grant a standalone Storage token.
+export function signedMedia(_supabase, value, bucket, resourceId, share = null) {
+    if (!["posts", "comments"].includes(bucket) || !/^\d+$/.test(String(resourceId))) {
+        throw new Error("Post media requires a valid resource owner");
+    }
+    const prefix = bucket === "posts" ? "post-asset" : "comment-asset";
+    const shareQuery = typeof share === "string" && share.length <= 100
+        ? "?share=" + encodeURIComponent(share) : "";
+    return parseArray(value).map((file, index) => ({
         ...file,
-        name: typeof file.name === "string" ? normalizeUploadFileName(file.name) : file.name
-    }));
-    const prefix = `/storage/v1/object/public/${bucket}/`;
-    const paths = media.map(file => {
-        try {
-            return decodeURIComponent(new URL(file.url).pathname.split(prefix)[1] || "");
-        } catch {
-            return "";
-        }
-    });
-    const requested = paths.filter(Boolean);
-    if (!requested.length) return media;
-    const { data, error } = await supabase.storage.from(bucket).createSignedUrls(requested, 3600);
-    if (error) throw error;
-    const urls = new Map((data || []).map(item => [item.path, item.signedUrl]));
-    return media.map((file, index) => ({
-        ...file,
+        name: typeof file.name === "string" ? normalizeUploadFileName(file.name) : file.name,
         id: file.id || file.url,
-        url: paths[index] ? urls.get(paths[index]) || "" : file.url
+        url: "/api/" + prefix + "/" + resourceId + "/" + index + shareQuery
     }));
 }
 
-export async function signedRows(supabase, rows, field, bucket) {
-    const files = rows.map(row => parseArray(row[field]));
-    const signed = await signedMedia(supabase, files.flat(), bucket);
-    let offset = 0;
-    return rows.map((row, index) => {
-        const media = signed.slice(offset, offset + files[index].length);
-        offset += files[index].length;
-        return { ...row, [field]: media };
-    });
+export async function signedRows(supabase, rows, field, bucket, share = null) {
+    return rows.map(row => ({
+        ...row,
+        [field]: signedMedia(supabase, row[field], bucket, row.id, share)
+    }));
 }

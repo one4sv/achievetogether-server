@@ -85,7 +85,7 @@ export default function (app, supabase) {
             // собираем финальный объект
             const comment = {
                 ...data,
-                files: await signedMedia(supabase, data.files, "comments"),
+                files: signedMedia(supabase, data.files, "comments", data.id),
                 user: userData,
             };
 
