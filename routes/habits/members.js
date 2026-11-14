@@ -322,14 +322,14 @@ export default function (app, supabase) {
         if (!["accepted", "declined"].includes(status)) return res.status(400).json({ success: false });
         try {
             const messageId = req.body?.message_id;
-            if (messageId !== undefined && (!Number.isSafeInteger(messageId) || messageId <= 0)) {
-                return res.status(400).json({ success: false });
+            if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+                return res.status(400).json({ success: false, error: "Ответьте на приглашение в сообщении" });
             }
             const { data: result, error } = await supabase.rpc("respond_habit_invitation", {
                 p_actor: req.user.id,
                 p_habit: Number(req.params.id),
                 p_status: status,
-                p_message: messageId ?? null
+                p_message: messageId
             });
             if (error) return sendInvitationError(res, error);
             if (result.message_id) await publishHabitInvitation(supabase, result.message_id, true);
