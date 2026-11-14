@@ -105,7 +105,7 @@ export default function(app, supabase, { send: sendRegistrationMail = sendMail }
 
     app.post("/register/resend", async (req, res) => {
         const mail = typeof req.body?.mail === "string" ? req.body.mail.trim().toLowerCase() : "";
-        if (mail.length > 254 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(mail)) {
+        if (mail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
             return res.status(400).json({ success: false, error: "Некорректный email" });
         }
 
