@@ -18,7 +18,14 @@ function fixture({ blocked = false, denyInvites = false, existingChat = null } =
         settings: [{ user_id: participant, private: { plan_invites: denyInvites ? "nobody" : "all" } }]
     };
     let writes = 0;
-    const supabase = { from(table) {
+    const supabase = { async rpc(name, args) {
+        assert.equal(name, "send_plan_invitations_batch");
+        for (const target of args.p_targets) {
+            rows.one_off_plan_members.push({ plan_id: args.p_plan, user_id: target, status: "pending", invited_by: args.p_actor });
+        }
+        writes++;
+        return { data: { results: args.p_targets.map(() => ({ already_invited: true })) }, error: null };
+    }, from(table) {
         const tests = [];
         let operation = "select";
         let payload;

@@ -157,6 +157,13 @@ test("personal plans can be promoted on the first invite without exposing them t
     assert.equal(app.getWrites(),0);
 });
 
+test("plan invitations cannot be accepted directly without an invitation message", async () => {
+    const app = mockedPlanServer("pending");
+    const noMessage = await callPlanRoute(app, "POST", "/plans/:id/respond", outsider, { status: "accepted" });
+    assert.equal(noMessage.status, 400);
+    assert.equal(app.getWrites(), 0);
+});
+
 test("plan member removal is owner-only and never removes its owner", async () => {
     const app = mockedPlanServer("accepted");
     const notOwner = await callPlanRoute(app,"DELETE","/plans/:id/members/:memberId",outsider);
@@ -188,7 +195,14 @@ test("owner invitation upgrades a personal plan, exposes pending status only to 
         ],
         settings: [{ user_id: targetId, private: { plan_invites: "contacts" } }]
     };
-    const supabase = { from(table) {
+    const supabase = { async rpc(name, args) {
+        assert.equal(name, "send_plan_invitation");
+        assert.equal(args.p_actor, owner);
+        assert.equal(args.p_plan, 1);
+        rows.one_off_plan_members.push({ plan_id: 1, user_id: args.p_target, status: "pending", invited_by: owner });
+        rows.one_off_plans[0].kind = "shared";
+        return { data: { chat_id: 12 }, error: null };
+    }, from(table) {
         let action = "select";
         let values = null;
         const predicates = [];
