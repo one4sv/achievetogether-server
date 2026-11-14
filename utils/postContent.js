@@ -1,4 +1,5 @@
 import { relationship,permitted,defaults } from "./privacy.js";
+import { normalizeUploadFileName } from "./fileNameEncoding.js";
 
 export const visibilityValues = ["inherit", "all", "contacts", "nobody", "link"];
 
@@ -82,7 +83,10 @@ export async function readablePost(supabase, id, viewer, share = null) {
 }
 
 export async function signedMedia(supabase, value, bucket) {
-    const media = parseArray(value);
+    const media = parseArray(value).map(file => ({
+        ...file,
+        name: typeof file.name === "string" ? normalizeUploadFileName(file.name) : file.name
+    }));
     const prefix = `/storage/v1/object/public/${bucket}/`;
     const paths = media.map(file => {
         try {

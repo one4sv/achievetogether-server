@@ -1,12 +1,9 @@
 import crypto from "crypto";
 import path from "path";
 import { parseArray, validateContent, visibilityValues } from "./postContent.js";
+import { normalizeUploadFileName } from "./fileNameEncoding.js";
 
-export function normalizeUploadFileName(name) {
-    if (!/[ÐÑ]/.test(name) || [...name].some(char => char.charCodeAt(0) > 255)) return name;
-    const decoded = Buffer.from(name, "latin1").toString("utf8");
-    return decoded.includes("\uFFFD") || !/[\u0400-\u04FF]/.test(decoded) ? name : decoded;
-}
+export { normalizeUploadFileName } from "./fileNameEncoding.js";
 
 export function savePost(supabase, editing) {
     return async (req, res) => {
