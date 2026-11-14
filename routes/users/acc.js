@@ -118,7 +118,7 @@ export default function (app, supabase) {
         habits: habits || [],
         plans,
         privateRules,
-        posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id, req.query?.share), "media", "posts"),
+        posts: await signedRows(supabase, await visiblePosts(supabase, posts || [], req.user?.id, req.query?.share), "media", "posts", req.query?.share),
       });
     } catch (err) {
       console.error("Ошибка при получении аккаунта:", err);

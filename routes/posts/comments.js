@@ -55,7 +55,7 @@ export default function (app, supabase) {
             }
 
             // Сопоставляем пользователей с комментариями
-            const signed = await signedRows(supabase, commentsData, "files", "comments");
+            const signed = await signedRows(supabase, commentsData, "files", "comments", req.query?.share);
             const comments = signed.map(c => ({
                 ...c,                user: usersData.find(u => u.id === c.user_id) || null,
             }));
