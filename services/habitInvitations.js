@@ -9,7 +9,7 @@ export function sendInvitationError(res, error) {
     });
 }
 
-export async function publishHabitInvitation(supabase, messageId, edited = false) {
+export async function publishHabitInvitation(supabase, messageId, edited = false, updateEvent = "HABIT_INVITATION_UPDATED") {
     try {
         const { data: message, error } = await supabase.from("messages").select("*").eq("id", messageId).single();
         if (error) throw error;
@@ -25,7 +25,7 @@ export async function publishHabitInvitation(supabase, messageId, edited = false
             read_by: message.read_by || [],
             reactions: message.reactions || []
         };
-        if (edited) broadcastMessageEdited(message.chat_id, payload, "HABIT_INVITATION_UPDATED");
+        if (edited) broadcastMessageEdited(message.chat_id, payload, updateEvent);
         else await broadcastNewMessage(message.chat_id, payload);
     } catch (error) {
         // Membership and message are already committed; realtime cannot undo delivery.

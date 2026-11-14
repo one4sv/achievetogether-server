@@ -1,3 +1,5 @@
+import { sendPlanInvitation, publishPlanInvitation } from "./planInvitations.js";
+
 // Shared by /plans/:id/chat and the existing CreateChat flow.
 // A linked group never gets private plan access implicitly: its members
 // receive ordinary pending invitations and must accept them.
@@ -63,10 +65,10 @@ export async function linkPlanToGroup(supabase, planId, chatId, ownerId) {
     }
 
     if (invites.length) {
-        const { error } = await supabase.from("one_off_plan_members")
-            .upsert(invites, { onConflict: "plan_id,user_id" });
+        const { data, error } = await supabase.rpc("send_plan_invitations_batch", {
+            p_actor: ownerId, p_plan: plan.id, p_targets: invites.map(invite => invite.user_id)
+        });
         if (error) {
-            // A failed invite must not silently leave an incomplete link.
             if (changed) {
                 const { error: rollback } = await supabase.from("one_off_plans")
                     .update({ chat_id: plan.chat_id ?? null, kind: plan.kind })
@@ -74,6 +76,10 @@ export async function linkPlanToGroup(supabase, planId, chatId, ownerId) {
                 if (rollback) console.error("[plan/chat] Link rollback failed:", rollback);
             }
             throw error;
+        }
+        for (const result of data?.results || []) {
+            if (result.message_id && !result.already_invited)
+                await publishPlanInvitation(supabase,result.message_id);
         }
     }
     return { chat_id: chatId, invited: invites.length };
@@ -101,11 +107,10 @@ export async function inviteJoinedGroupMemberToPlans(supabase, chatId, userId) {
         .map(member => String(member.plan_id)));
     const candidates = plans.filter(plan => plan.owner_id !== userId && !already.has(String(plan.id)));
     if (!candidates.length) return 0;
-    const { error } = await supabase.from("one_off_plan_members")
-        .upsert(candidates.map(plan => ({
-            plan_id: plan.id, user_id: userId, invited_by: plan.owner_id,
-            status: "pending", joined_at: null
-        })), { onConflict: "plan_id,user_id" });
-    if (error) throw error;
-    return candidates.length;
+    let invited = 0;
+    for (const plan of candidates) {
+        const result = await sendPlanInvitation(supabase,plan.owner_id,plan.id,userId);
+        if (!result.already_invited && !result.already_member) invited++;
+    }
+    return invited;
 }

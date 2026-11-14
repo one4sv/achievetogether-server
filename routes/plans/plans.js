@@ -1,5 +1,7 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { linkPlanToGroup } from "../../services/planChatLink.js";
+import { sendPlanInvitation, readPlanInvitation, publishPlanInvitation } from "../../services/planInvitations.js";
+import { sendInvitationError } from "../../services/habitInvitations.js";
 import { ownerPrivacy, relationship, permitted } from "../../utils/privacy.js";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -137,6 +139,15 @@ async function areContacts(supabase,one,two) {
 }
 export default function registerPlans(app,supabase) {
     const auth = authenticateUser(supabase);
+
+    app.get("/messages/:id/plan-invitation", auth, async(req,res) => {
+        if (!signedIn(req,res)) return;
+        try {
+            const invitation = await readPlanInvitation(supabase, Number(req.params.id), req.user.id);
+            if (!invitation) return res.status(404).json({ success:false,error:"Приглашение недоступно" });
+            return res.json({ success:true,invitation });
+        } catch(error) { return failed(res,error); }
+    });
 
     app.get("/plans",auth,async(req,res) => {
         if (!signedIn(req,res)) return;
@@ -343,28 +354,14 @@ export default function registerPlans(app,supabase) {
                 viewerId:req.user.id,ownerId:target.id,contact:rel.contact,blocked:rel.blocked });
             if (!allowed) return res.status(403)
                 .json({ success:false,error:"Приглашение запрещено настройками приватности" });
-            const { data: existing,error: existingError } = await supabase.from("one_off_plan_members")
-                .select("status").eq("plan_id",entry.plan.id).eq("user_id",target.id).maybeSingle();
-            if (existingError) throw existingError;
-            if (existing && existing.status !== "declined") return res.status(409).json({ success:false });
-            const { error: inviteError } = await supabase.from("one_off_plan_members")
-                .upsert({ plan_id:entry.plan.id,user_id:target.id,status:"pending",
-                    invited_by:req.user.id,joined_at:null }, { onConflict:"plan_id,user_id" });
-            if (inviteError) throw inviteError;
-            if (entry.plan.kind === "personal") {
-                // An invitation turns the existing private plan into a shared one.
-                // If promotion fails, withdraw the just-created invitation.
-                const { error: promoteError } = await supabase.from("one_off_plans")
-                    .update({ kind:"shared", updated_at:new Date().toISOString() })
-                    .eq("id",entry.plan.id).eq("owner_id",req.user.id);
-                if (promoteError) {
-                    await supabase.from("one_off_plan_members")
-                        .delete().eq("plan_id",entry.plan.id).eq("user_id",target.id).eq("status","pending");
-                    throw promoteError;
-                }
-            }
-            return res.json({ success: true });
-        } catch(error) { return failed(res,error); }
+            const result = await sendPlanInvitation(supabase,req.user.id,entry.plan.id,target.id);
+            if (result.already_member || result.already_invited)
+                return res.status(409).json({ success:false,error:"Участник уже приглашён" });
+            return res.json({ success:true,...result });
+        } catch(error) {
+            if (error.code === "42501" || error.code === "22023") return sendInvitationError(res,error);
+            return failed(res,error);
+        }
     });
 
     app.delete("/plans/:id/members/:memberId",auth,async(req,res) => {
@@ -379,7 +376,7 @@ export default function registerPlans(app,supabase) {
             if (entry.plan.status === "canceled") return res.status(409).json({ success:false });
             if (memberId === entry.plan.owner_id) return res.status(403).json({ success:false });
             const { data: existing, error:lookupError } = await supabase.from("one_off_plan_members")
-                .select("status").eq("plan_id",entry.plan.id).eq("user_id",memberId).maybeSingle();
+                .select("status,invitation_message_id").eq("plan_id",entry.plan.id).eq("user_id",memberId).maybeSingle();
             if (lookupError) throw lookupError;
             if (!existing || existing.status === "declined")
                 return res.status(404).json({ success:false });
@@ -394,24 +391,25 @@ export default function registerPlans(app,supabase) {
                     .eq("plan_id",entry.plan.id).eq("user_id",memberId)
             ]);
             if (completion.error || comment.error) throw completion.error || comment.error;
+            if (existing.invitation_message_id)
+                await publishPlanInvitation(supabase,existing.invitation_message_id,true);
             return res.json({ success:true });
         } catch(error) { return failed(res,error); }
     });
 
     app.post("/plans/:id/respond",auth,async(req,res) => {
         if (!signedIn(req,res)) return;
-        if (!["accepted","declined"].includes(req.body?.status)) return res.status(400).json({ success:false });
+        if (!["accepted","declined"].includes(req.body?.status) ||
+            !Number.isSafeInteger(req.body?.message_id) || req.body.message_id <= 0 ||
+            !validId(req.params.id)) return res.status(400).json({ success:false });
         try {
-            const entry = await access(supabase,req.params.id,req.user.id);
-            if (!entry) return res.status(404).json({ success:false });
-            if (entry.owner || entry.status !== "pending" || entry.plan.status === "canceled")
-                return res.status(409).json({ success:false });
-            const { error } = await supabase.from("one_off_plan_members")
-                .update({ status:req.body.status,
-                    joined_at:req.body.status === "accepted" ? new Date().toISOString() : null })
-                .eq("plan_id",entry.plan.id).eq("user_id",req.user.id).eq("status","pending");
-            if (error) throw error;
-            return res.json({ success:true });
+            const { data:result,error } = await supabase.rpc("respond_plan_invitation", {
+                p_actor:req.user.id,p_plan:Number(req.params.id),p_status:req.body.status,
+                p_message:req.body.message_id
+            });
+            if (error) return sendInvitationError(res,error);
+            if (result.message_id) await publishPlanInvitation(supabase,result.message_id,true);
+            return res.json({ success:true,...result });
         } catch(error) { return failed(res,error); }
     });
 

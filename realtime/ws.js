@@ -92,7 +92,7 @@ export async function broadcastNewMessage(chat_id, message) {
           chatName: chat.name, isGroup: chat.is_group, message
         }).catch(error => console.warn("Push dispatch failed:", error.message));
       }
-      if ((allNote && newMessNote && chatNote) || message.habit_invite_habit_id) {
+      if ((allNote && newMessNote && chatNote) || message.habit_invite_habit_id || message.plan_invite_plan_id) {
         const sockets = clientsMap.get(userId);
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
