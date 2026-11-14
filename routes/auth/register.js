@@ -6,7 +6,7 @@ import { getMailTemplate } from "../../utils/mailTamlate.js";
 
 dotenv.config();
 
-export default function(app, supabase) {
+export default function(app, supabase, { send: sendRegistrationMail = sendMail } = {}) {
     const checkDuplicates = async (table, nick, mail) => {
         if (nick) {
             const { data, error } = await supabase
@@ -89,7 +89,7 @@ export default function(app, supabase) {
             });
 
             try {
-                await sendMail(mail, "Подтверждение регистрации", mailHtml);
+                await sendRegistrationMail(mail, "Подтверждение регистрации", mailHtml);
             } catch (deliveryError) {
                 await supabase.from("pending_users").delete().eq("mail", mail).eq("nick", nick).eq("code", code);
                 throw deliveryError;
@@ -102,6 +102,80 @@ export default function(app, supabase) {
             res.status(500).json({ success: false, error: err.message || "Ошибка регистрации" });
         }
     });
+
+    app.post("/register/resend", async (req, res) => {
+        const mail = typeof req.body?.mail === "string" ? req.body.mail.trim().toLowerCase() : "";
+        if (mail.length > 254 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(mail)) {
+            return res.status(400).json({ success: false, error: "Некорректный email" });
+        }
+
+        try {
+            const { data: pending, error: pendingError } = await supabase
+                .from("pending_users")
+                .select("id, nick, mail, code, created_at, expires_at")
+                .eq("mail", mail)
+                .maybeSingle();
+            if (pendingError) throw pendingError;
+            if (!pending) return res.status(404).json({
+                success: false, error: "Ожидающая подтверждения регистрация не найдена"
+            });
+
+            const now = Date.now();
+            const remaining = Math.ceil((60000 - (now - new Date(pending.created_at).getTime())) / 1000);
+            if (remaining > 0) {
+                res.set("Retry-After", String(remaining));
+                return res.status(429).json({
+                    success: false, error: "Повторная отправка пока недоступна",
+                    retryAfterSeconds: remaining
+                });
+            }
+
+            let code = String(randomInt(100000, 1000000));
+            while (code === pending.code) code = String(randomInt(100000, 1000000));
+            const created_at = new Date(now).toISOString();
+            const expires_at = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+
+            // Database-side conditional update prevents simultaneous requests from bypassing the cooldown.
+            const { data: updated, error: updateError } = await supabase
+                .from("pending_users")
+                .update({ code, created_at, expires_at })
+                .eq("id", pending.id)
+                .lte("created_at", new Date(now - 60000).toISOString())
+                .select("id")
+                .maybeSingle();
+            if (updateError) throw updateError;
+            if (!updated) {
+                res.set("Retry-After", "60");
+                return res.status(429).json({
+                    success: false, error: "Повторная отправка пока недоступна",
+                    retryAfterSeconds: 60
+                });
+            }
+
+            try {
+                await sendRegistrationMail(mail, "Подтверждение регистрации", getMailTemplate({
+                    code,
+                    title: "Подтвердите регистрацию",
+                    subtitle: `Здравствуйте, ${pending.nick}!`,
+                    expireText: "Код действителен 24 часа"
+                }));
+            } catch (deliveryError) {
+                // Keep the previous usable code when the mail provider rejects a resend.
+                const { error: rollbackError } = await supabase.from("pending_users")
+                    .update({ code: pending.code, created_at: pending.created_at, expires_at: pending.expires_at })
+                    .eq("id", pending.id)
+                    .eq("code", code);
+                if (rollbackError) console.error("Registration resend rollback error:", rollbackError);
+                throw deliveryError;
+            }
+
+            return res.json({ success: true, retryAfterSeconds: 60 });
+        } catch (error) {
+            console.error("Registration resend error:", error);
+            return res.status(500).json({ success: false, error: "Не удалось повторно отправить код" });
+        }
+    });
+
     app.post("/register/check", async (req, res) => {
         const { nick, mail } = req.body;
 
