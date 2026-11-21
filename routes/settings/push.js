@@ -34,6 +34,8 @@ export default function pushRoutes(app, supabase) {
 
     app.post("/push/subscribe", auth, protect, async (req, res) => {
         const subscription = req.body?.subscription;
+        const language = req.body?.language ?? "ru";
+        if (language !== "ru" && language !== "en") return res.status(400).json({ success: false, error: "Invalid language" });
         if (!validPushSubscription(subscription)) return res.status(400).json({ success: false, error: "Invalid subscription" });
         if (!publicVapidKey()) return res.status(503).json({ success: false, error: "Push not configured" });
         const hash = endpointHash(subscription.endpoint);
@@ -53,6 +55,7 @@ export default function pushRoutes(app, supabase) {
                 expiration_time: subscription.expirationTime ?? null,
                 user_id: req.user.id,
                 session_id: req.sessionId,
+                language,
                 updated_at: new Date().toISOString()
             }, { onConflict: "endpoint_hash" });
             if (error) throw error;

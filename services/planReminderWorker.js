@@ -1,4 +1,5 @@
 import { sendWebPush, validPushEndpoint } from "../utils/webPush.js";
+import { planReminderBody } from "../utils/reminderPushText.js";
 
 let running = false;
 
@@ -48,7 +49,7 @@ async function deliver(supabase, job) {
         }
         const { data: subscriptions, error: lookupError } = await supabase
             .from("at_push_subscriptions")
-            .select("endpoint,endpoint_hash,p256dh,auth,expiration_time,session_id")
+            .select("endpoint,endpoint_hash,p256dh,auth,expiration_time,session_id,language")
             .eq("user_id", job.user_id).limit(10);
         if (lookupError) throw lookupError;
         if (!subscriptions?.length) return await finish(supabase, job, "skipped", "not_subscribed");
@@ -62,16 +63,16 @@ async function deliver(supabase, job) {
         if (!targets.length) return await finish(supabase, job, "skipped", "no_active_subscriptions");
         const payload = {
             title: "AchieveTogether",
-            body: "Напоминание о плане / Plan reminder: " + String(plan.name).slice(0, 90),
             url: "/plan/" + encodeURIComponent(String(plan.id)),
             tag: "at-plan-reminder-" + job.plan_id + "-" + job.rule_code
         };
         const attempts = await Promise.allSettled(targets.map(async subscription => {
+            const localizedPayload = { ...payload, body: planReminderBody(plan.name, subscription.language) };
             const result = await sendWebPush({
                 endpoint: subscription.endpoint,
                 expirationTime: subscription.expiration_time,
                 keys: { p256dh: subscription.p256dh, auth: subscription.auth }
-            }, payload);
+            }, localizedPayload);
             if (result.status === 404 || result.status === 410) {
                 await supabase.from("at_push_subscriptions").delete()
                     .eq("user_id", job.user_id).eq("endpoint_hash", subscription.endpoint_hash);

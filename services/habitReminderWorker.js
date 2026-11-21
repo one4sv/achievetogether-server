@@ -1,4 +1,5 @@
 import { sendWebPush, validPushEndpoint } from "../utils/webPush.js";
+import { habitReminderBody } from "../utils/reminderPushText.js";
 
 let running = false;
 
@@ -31,7 +32,7 @@ async function deliverJob(supabase, job) {
         }
         const { data: subscriptions, error: lookupError } = await supabase
             .from("at_push_subscriptions")
-            .select("endpoint,endpoint_hash,p256dh,auth,expiration_time,session_id")
+            .select("endpoint,endpoint_hash,p256dh,auth,expiration_time,session_id,language")
             .eq("user_id", job.user_id).limit(10);
         if (lookupError) throw lookupError;
         if (!subscriptions?.length) return await completeJob(supabase, job, "skipped", "not_subscribed");
@@ -50,18 +51,17 @@ async function deliverJob(supabase, job) {
         const common = job.reminder_code === "common";
         const payload = {
             title: "AchieveTogether",
-            body: common ? "Время отметить активности на сегодня / Time for today's activities" :
-                "Напоминание об активности / Activity reminder: " + String(habit.name).slice(0, 90),
             url: common ? "/habit" : "/habit/" + encodeURIComponent(String(habit.id)),
             tag: common ? "at-reminder-common-" + job.common_day :
                 "at-reminder-" + job.habit_id + "-" + job.reminder_code
         };
         const attempts = await Promise.allSettled(validSubscriptions.map(async subscription => {
+            const localizedPayload = { ...payload, body: habitReminderBody(common, habit.name, subscription.language) };
             const result = await sendWebPush({
                 endpoint: subscription.endpoint,
                 expirationTime: subscription.expiration_time,
                 keys: { p256dh: subscription.p256dh, auth: subscription.auth }
-            }, payload);
+            }, localizedPayload);
             if (result.status === 404 || result.status === 410) {
                 await supabase.from("at_push_subscriptions").delete()
                     .eq("user_id", job.user_id).eq("endpoint_hash", subscription.endpoint_hash);
