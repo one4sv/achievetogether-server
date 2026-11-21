@@ -90,6 +90,6 @@ export default function (app, supabase) {
       return res.status(500).json({ counterError: "Failed to add counter settings" });
     }
 
-    res.status(200).json({ success: true });
+    res.status(200).json({ success: true, habit_id: habit.id });
   });
 }
