@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createHash } from "node:crypto";
 import { deliverMessagePush } from "../services/push.js";
+import { mentionedMemberIds, shouldNotifyMessage } from "../utils/mentions.js";
 import { rewritePrivateAssets } from "../routes/system/private-assets.js";
 let clientsMap = new Map();
 let supabaseGlobal;
@@ -69,9 +70,15 @@ export async function broadcastNewMessage(chat_id, message) {
     }
 
     const userIds = members.map(m => m.user_id);
+    let mentioned = new Set();
+    if (typeof message.content === "string" && message.content.includes("@")) {
+      const { data: usernames, error: namesError } = await supabaseGlobal
+        .from("users").select("id,nick").in("id", userIds);
+      if (!namesError) mentioned = mentionedMemberIds(message.content, usernames || [], members, senderId);
+    }
     const { data: settingsList } = await supabaseGlobal
       .from("settings")
-      .select("user_id, all_note, new_mess_note")
+      .select("user_id, all_note, new_mess_note, mentions_note")
       .in("user_id", userIds);
 
     const settingsMap = new Map(settingsList?.map(s => [s.user_id, s]) || []);
@@ -81,18 +88,22 @@ export async function broadcastNewMessage(chat_id, message) {
       const userSettings = settingsMap.get(userId);
       const allNote = userSettings?.all_note ?? true;
       const newMessNote = userSettings?.new_mess_note ?? true;
+      const mentionsNote = userSettings?.mentions_note ?? true;
       const chatNote = member.note ?? true;
-      console.log("UserId:", userId, "allNote:", allNote, "newMessNote:", newMessNote, "chatNote:", chatNote);
-     
+      const notify = shouldNotifyMessage({
+        allNote, newMessNote, mentionsNote, chatNote, isMention: mentioned.has(userId)
+      });
+
       if (member.is_blocked) continue;
-      if (userId !== senderId && allNote && newMessNote && chatNote) {
+      if (userId !== senderId && notify) {
         void deliverMessagePush(supabaseGlobal, {
           userId, senderId, senderName: senderData?.username,
           senderNick: senderData?.nick, chatId: chat_id,
           chatName: chat.name, isGroup: chat.is_group, message
         }).catch(error => console.warn("Push dispatch failed:", error.message));
       }
-      if ((allNote && newMessNote && chatNote) || message.habit_invite_habit_id || message.plan_invite_plan_id) {
+      // Mute controls notifications, not reception of the actual message.
+      {
         const sockets = clientsMap.get(userId);
         sockets?.forEach(s => {
           if (s.readyState === WebSocket.OPEN) {
@@ -103,7 +114,7 @@ export async function broadcastNewMessage(chat_id, message) {
               message: rewritePrivateAssets(message),
               nick: senderData?.nick || null,
               username: senderData?.username || null,
-              is_note: allNote && newMessNote && chatNote,
+              is_note: notify,
               is_group: chat.is_group
             }));
           }

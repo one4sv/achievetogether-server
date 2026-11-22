@@ -106,10 +106,10 @@ export default function (app, supabase) {
                 if (error) throw error;
                 return res.json({ success:true });
             }
-            if (["all_note", "new_mess_note"].includes(setting) && typeof value !== "boolean") {
+            if (["all_note", "new_mess_note", "mentions_note"].includes(setting) && typeof value !== "boolean") {
                 return res.status(400).json({ success: false, error: "Boolean preference required" });
             }
-            if (['order', 'show_archived', 'show_archived_in_acc', 'private', "week_start", "all_note", "new_mess_note"].includes(setting)) {
+            if (['order', 'show_archived', 'show_archived_in_acc', 'private', "week_start", "all_note", "new_mess_note", "mentions_note"].includes(setting)) {
                 const { error } = await supabase
                     .from('settings')
                     .upsert({

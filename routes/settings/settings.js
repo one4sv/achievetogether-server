@@ -69,6 +69,7 @@ export default function (app, supabase) {
                 twoAuth: data.two_auth,
                 all_note: data.all_note ?? true,
                 new_mess_note: data.new_mess_note ?? true,
+                mentions_note: data.mentions_note ?? true,
                 show_archived: data.show_archived,
                 show_archived_in_acc: data.show_archived_in_acc,
                 week_start: data.week_start
