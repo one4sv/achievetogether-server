@@ -18,6 +18,7 @@ import pushRoutes from "./settings/push.js";
 import updatesettingsRoutes from "./settings/updatesettings.js";
 import updatehabitRoutes from "./habits/updatehabit.js";
 import contactsRoutes from "./chat/contacts.js";
+import globalSearchRoutes from "./search/global.js";
 import chatRoutes from "./chat/chat.js";
 import adminRoutes from "./system/admin.js";
 import accRoutes from "./users/acc.js";
@@ -86,6 +87,7 @@ export default function registerAllRoutes(app, supabase) {
     updatesettingsRoutes(app, supabase);
     updatehabitRoutes(app, supabase);
     contactsRoutes(app, supabase);
+    globalSearchRoutes(app, supabase);
     chatRoutes(app, supabase);
     adminRoutes(app, supabase);
     accRoutes(app, supabase);
