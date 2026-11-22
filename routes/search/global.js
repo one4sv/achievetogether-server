@@ -23,6 +23,12 @@ const safeText = value => String(value || "").replace(/[\r\n]+/g, " ").trim().sl
 const result = (kind, id, label, url, description = "", date = "", visual = {}) =>
     ({ kind, id: String(id), label: safeText(label), description: safeText(description), url, date, ...visual });
 
+export function sortGlobalSearchResults(results, filter) {
+    const prioritizeMine = ["habit", "plan", "post"].includes(filter);
+    return results.sort((a, b) => prioritizeMine && a.mine !== b.mine
+        ? (a.mine ? -1 : 1) : (b.date || "").localeCompare(a.date || ""));
+}
+
 export default function globalSearchRoutes(app, supabase) {
     app.get("/search/global", authenticateUser(supabase), async (req, res) => {
         const actor = req.user?.id;
@@ -179,9 +185,7 @@ export default function globalSearchRoutes(app, supabase) {
                     }
                 }
             }
-            const prioritizeMine = ["habit", "plan", "post"].includes(filter);
-            results.sort((a, b) => prioritizeMine && a.mine !== b.mine
-                ? (a.mine ? -1 : 1) : (b.date || "").localeCompare(a.date || ""));
+            sortGlobalSearchResults(results, filter);
             return res.json({ success: true, filter, query, items: results.slice(0, LIMIT),
                 hasMore: results.length > LIMIT });
         } catch (error) {
