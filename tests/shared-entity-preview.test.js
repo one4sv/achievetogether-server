@@ -4,7 +4,7 @@ import { postCardExcerpt } from "../utils/sharedEntity.js";
 import { parseGlobalQuery } from "../routes/search/global.js";
 test("post preview reads rich text without JSON or markup", () => {
     assert.equal(postCardExcerpt(JSON.stringify({type:"doc",content:[
-        {type:"paragraph",content:[{type:"text",text:"Hello "},{type:"text",text:"world"}]}]})), "Hello  world");
+        {type:"paragraph",content:[{type:"text",text:"Hello "},{type:"text",text:"world"}]}]})), "Hello world");
     assert.equal(postCardExcerpt("One\nTwo"), "One Two");
 });
 test("explicit share commands list current accessible entities without extra typing", () => {
