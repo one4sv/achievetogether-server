@@ -130,6 +130,10 @@ export default function (app, supabase) {
             if (habitError) throw habitError;
             if (!habit) return res.status(404).json({ success: false });
             if (habit.user_id !== userId) return res.status(403).json({ success: false, error: "Только владелец может изменять привязку" });
+            if (req.body?.only_if_unlinked === true && habit.chat_id &&
+                Number(habit.chat_id) !== chatId) {
+                return res.status(409).json({ success: false, error: "Активность уже привязана к другой беседе" });
+            }
             let invitedPartner = false;
             if (chatId !== null) {
                 const { data: chat, error: chatError } = await supabase.from("chats")
@@ -169,10 +173,14 @@ export default function (app, supabase) {
                     }
                 }
             }
-            const { data: updated, error } = await supabase.from("habits")
-                .update({ chat_id: chatId, ...(chatId === null ? Object.fromEntries(["complete_permission", "comment_permission", "edit_blocks_permission", "edit_info_permission", "invite_permission"].filter(key => habit[key] === "roles").map(key => [key, key === "complete_permission" || key === "comment_permission" ? "members" : "owner"])) : {}) }).eq("id", habit.id).eq("user_id", userId)
-                .select("id, chat_id").single();
+            let update = supabase.from("habits")
+                .update({ chat_id: chatId, ...(chatId === null ? Object.fromEntries(["complete_permission", "comment_permission", "edit_blocks_permission", "edit_info_permission", "invite_permission"].filter(key => habit[key] === "roles").map(key => [key, key === "complete_permission" || key === "comment_permission" ? "members" : "owner"])) : {}) }).eq("id", habit.id).eq("user_id", userId);
+            if (req.body?.only_if_unlinked === true && !habit.chat_id) {
+                update = update.is("chat_id", null);
+            }
+            const { data: updated, error } = await update.select("id, chat_id").maybeSingle();
             if (error) throw error;
+            if (!updated) return res.status(409).json({ success: false, error: "Активность уже привязана к другой беседе" });
             return res.json({ success: true, habit: updated, invited_partner: invitedPartner });
         } catch (error) {
             console.error("Ошибка привязки активности к беседе:", error);
