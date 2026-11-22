@@ -6,6 +6,9 @@ test("post preview reads rich text without JSON or markup", () => {
     assert.equal(postCardExcerpt(JSON.stringify({type:"doc",content:[
         {type:"paragraph",content:[{type:"text",text:"Hello "},{type:"text",text:"world"}]}]})), "Hello world");
     assert.equal(postCardExcerpt("One\nTwo"), "One Two");
+    const longText = "a".repeat(900);
+    assert.equal(postCardExcerpt(longText).length, 700);
+    assert.equal(postCardExcerpt(longText).slice(-1), "a");
 });
 test("explicit share commands list current accessible entities without extra typing", () => {
     for(const type of ["user","habit","plan","post","group"])
