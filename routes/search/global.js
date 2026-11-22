@@ -47,7 +47,7 @@ export default function globalSearchRoutes(app, supabase) {
             const blocked = new Set(allMembers.filter(m => m.is_blocked).map(m => idOf(m.chat_id)));
             const chats = (chatsResponse.data || []).filter(chat => chat.is_group || !blocked.has(idOf(chat.id)));
             const allowed = new Set(chats.map(chat => idOf(chat.id)));
-            const peers = [...new Set(allMembers.filter(m => allowed.has(idOf(m.chat_id)))
+            const peers = [...new Set(allMembers.filter(m => !m.is_blocked && allowed.has(idOf(m.chat_id)))
                 .map(m => m.user_id).filter(id => id !== actor))];
             const { data: people, error: peopleError } = peers.length
                 ? await supabase.from("users").select("id,nick,username,avatar_url")
@@ -66,7 +66,7 @@ export default function globalSearchRoutes(app, supabase) {
             const results = [];
             const add = row => { if (row && results.length < 150) results.push(row); };
             const offset = page * LIMIT;
-            if (wants("ms") && chatIds.length) {
+            if (wants("ms") && allowed.size) {
                 const { data, error } = await supabase.from("messages")
                     .select("id,chat_id,content,sender_id,hidden,read_by,created_at")
                     .in("chat_id", [...allowed]).ilike("content", like)
