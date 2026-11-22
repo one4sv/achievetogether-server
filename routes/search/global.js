@@ -2,7 +2,7 @@ import { authenticateUser } from "../../middleware/token.js";
 import { canAccessMessage } from "../../utils/messageAccess.js";
 import { getHabitAccess } from "../../utils/habitAccess.js";
 import { relationship } from "../../utils/privacy.js";
-import { sharedEntityPreview } from "../../utils/sharedEntity.js";
+import { sharedEntityPreview, postCardExcerpt } from "../../utils/sharedEntity.js";
 import { readablePost, visiblePosts } from "../../utils/postContent.js";
 
 export const searchCategories = new Set(["ms", "com", "post", "user", "habit", "plan", "group", "every", "new"]);
@@ -32,6 +32,7 @@ export default function globalSearchRoutes(app, supabase) {
         if (!parsed || !Number.isInteger(page) || page < 0 || page > 30)
             return res.status(400).json({ success: false, error: "Invalid search query" });
         const { filter, query, like } = parsed;
+        const mineOnly = req.query.mine_only === "1" && (filter === "habit" || filter === "plan");
         // /invite in a group lists only the caller's unlinked activities and upcoming plans.
         const linkToChat = req.query.link_to_chat === "1" &&
             (filter === "habit" || filter === "plan");
@@ -111,15 +112,16 @@ export default function globalSearchRoutes(app, supabase) {
                 }
             }
             if (wants("habit")) {
-                let habitsQuery = supabase.from("habits").select("id,name,created_at")
+                let habitsQuery = supabase.from("habits").select("id,name,created_at,user_id")
                     .ilike("name", like).order("id", { ascending: false });
                 if (linkToChat) habitsQuery = habitsQuery.eq("user_id", actor).is("chat_id", null);
+                else if (mineOnly) habitsQuery = habitsQuery.eq("user_id", actor);
                 const { data, error } = await habitsQuery.limit(80);
                 if (error) throw error;
                 for (const habit of data || []) {
                     const access = await getHabitAccess(supabase, habit.id, actor);
                     if (access?.can_view) add(result("habit", habit.id, habit.name, "/habit/" + habit.id, "", habit.created_at,
-                        { tag: access.habit?.tag || null }));
+                        { tag: access.habit?.tag || null, mine: idOf(habit.user_id) === idOf(actor) }));
                 }
             }
             if (wants("plan")) {
@@ -136,12 +138,13 @@ export default function globalSearchRoutes(app, supabase) {
                         .select("id,name,owner_id,plan_date,tag").in("id", ids).ilike("name", like);
                     if (linkToChat) plansQuery = plansQuery.eq("owner_id", actor)
                         .eq("status", "upcoming").is("chat_id", null);
+                    else if (mineOnly) plansQuery = plansQuery.eq("owner_id", actor);
                     const { data, error } = await plansQuery.limit(80);
                     if (error) throw error;
                     for (const plan of data || []) {
                         if (plan.owner_id !== actor && (await relationship(supabase, actor, plan.owner_id)).blocked) continue;
                         add(result("plan", plan.id, plan.name, "/plan/" + plan.id, plan.plan_date, plan.plan_date,
-                            { tag: plan.tag || null }));
+                            { tag: plan.tag || null, mine: idOf(plan.owner_id) === idOf(actor) }));
                     }
                 }
             }
@@ -151,7 +154,18 @@ export default function globalSearchRoutes(app, supabase) {
                         .ilike("text", like).order("id", { ascending: false }).range(offset, offset + 39);
                     if (error) throw error;
                     const safe = await visiblePosts(supabase, data || [], actor);
-                    for (const post of safe) add(result("post", post.id, post.text, "/post/" + post.id, "", post.created_at));
+                    const authorIds = [...new Set(safe.map(post => post.user_id).filter(Boolean))];
+                    const { data: authors, error: authorsError } = authorIds.length
+                        ? await supabase.from("users").select("id,username,nick,avatar_url").in("id", authorIds)
+                        : { data: [], error: null };
+                    if (authorsError) throw authorsError;
+                    const authorMap = new Map((authors || []).map(author => [idOf(author.id), author]));
+                    for (const post of safe) {
+                        const author = authorMap.get(idOf(post.user_id));
+                        add(result("post", post.id, postCardExcerpt(post.text), "/post/" + post.id,
+                            author?.username || author?.nick || "", post.created_at,
+                            { mine: idOf(post.user_id) === idOf(actor), avatar_url: author?.avatar_url || null }));
+                    }
                 }
                 if (wants("com")) {
                     const { data, error } = await supabase.from("posts_comments")
