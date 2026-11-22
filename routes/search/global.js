@@ -32,6 +32,9 @@ export default function globalSearchRoutes(app, supabase) {
         if (!parsed || !Number.isInteger(page) || page < 0 || page > 30)
             return res.status(400).json({ success: false, error: "Invalid search query" });
         const { filter, query, like } = parsed;
+        // /invite in a group lists only the caller's unlinked activities and upcoming plans.
+        const linkToChat = req.query.link_to_chat === "1" &&
+            (filter === "habit" || filter === "plan");
         const wants = kind => filter === "every" || filter === kind || (filter === "new" && kind === "ms");
         try {
             const { data: mine, error: mineError } = await supabase.from("chat_members")
@@ -107,8 +110,10 @@ export default function globalSearchRoutes(app, supabase) {
                 }
             }
             if (wants("habit")) {
-                const { data, error } = await supabase.from("habits").select("id,name,created_at")
-                    .ilike("name", like).order("id", { ascending: false }).limit(80);
+                let habitsQuery = supabase.from("habits").select("id,name,created_at")
+                    .ilike("name", like).order("id", { ascending: false });
+                if (linkToChat) habitsQuery = habitsQuery.eq("user_id", actor).is("chat_id", null);
+                const { data, error } = await habitsQuery.limit(80);
                 if (error) throw error;
                 for (const habit of data || []) {
                     const access = await getHabitAccess(supabase, habit.id, actor);
@@ -118,13 +123,18 @@ export default function globalSearchRoutes(app, supabase) {
             if (wants("plan")) {
                 const { data: owned, error: ownedError } = await supabase.from("one_off_plans")
                     .select("id").eq("owner_id", actor).limit(500);
-                const { data: memberships, error: planError } = await supabase.from("one_off_plan_members")
-                    .select("plan_id").eq("user_id", actor).eq("status", "accepted").limit(500);
+                const { data: memberships, error: planError } = linkToChat
+                    ? { data: [], error: null }
+                    : await supabase.from("one_off_plan_members")
+                        .select("plan_id").eq("user_id", actor).eq("status", "accepted").limit(500);
                 if (ownedError || planError) throw ownedError || planError;
                 const ids = [...new Set([...(owned || []).map(x => x.id), ...(memberships || []).map(x => x.plan_id)])];
                 if (ids.length) {
-                    const { data, error } = await supabase.from("one_off_plans")
-                        .select("id,name,owner_id,plan_date").in("id", ids).ilike("name", like).limit(80);
+                    let plansQuery = supabase.from("one_off_plans")
+                        .select("id,name,owner_id,plan_date").in("id", ids).ilike("name", like);
+                    if (linkToChat) plansQuery = plansQuery.eq("owner_id", actor)
+                        .eq("status", "upcoming").is("chat_id", null);
+                    const { data, error } = await plansQuery.limit(80);
                     if (error) throw error;
                     for (const plan of data || []) {
                         if (plan.owner_id !== actor && (await relationship(supabase, actor, plan.owner_id)).blocked) continue;
