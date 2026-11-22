@@ -10,6 +10,7 @@ import { canAccessMessage } from "../../utils/messageAccess.js";
 import { originalAssetUrl } from "../system/private-assets.js";
 import { hasServerPermission } from "../../utils/hasPermission.js";
 import { PERMS } from "../../config/permissions.js";
+import { sharedEntityPreview } from "../../utils/sharedEntity.js";
 
 export default function (app, supabase) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { files: 20, fileSize: 10 * 1024 * 1024, fieldSize: 2 * 1024 * 1024 } });
@@ -340,7 +341,7 @@ export default function (app, supabase) {
 
     const files = req.files || [];
 
-    if ((!text || !text.trim()) && files.length === 0 && redirect.length === 0) {
+    if ((!text || !text.trim()) && files.length === 0 && redirect.length === 0 && !req.body.entity_type) {
       return res.status(400).json({ success: false, error: "Сообщение пустое" });
     }
 
@@ -519,6 +520,11 @@ export default function (app, supabase) {
         }
       }
 
+      let sharedEntity = null;
+      if (req.body.entity_type || req.body.entity_id) {
+        sharedEntity = await sharedEntityPreview(supabase, req.body.entity_type, req.body.entity_id, senderId);
+        if (!sharedEntity) return res.status(404).json({ success: false, error: "Object not available" });
+      }
       // Основное сообщение
       const { data: mainMessage } = await supabase
         .from("messages")
@@ -527,6 +533,8 @@ export default function (app, supabase) {
             chat_id: chatId,
             sender_id: senderId,
             content: text || "",
+            entity_type: sharedEntity?.kind || null,
+            entity_id: sharedEntity?.id || null,
             answer_id: answer_id || null,
             redirected_id: resolvedRedirects.length > 0 ? resolvedRedirects[0] : null,
             show_names: redirect.length ? show_names : true,

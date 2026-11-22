@@ -20,6 +20,7 @@ import updatehabitRoutes from "./habits/updatehabit.js";
 import contactsRoutes from "./chat/contacts.js";
 import globalSearchRoutes from "./search/global.js";
 import chatRoutes from "./chat/chat.js";
+import sharedEntityRoutes from "./chat/shared-entity.js";
 import adminRoutes from "./system/admin.js";
 import accRoutes from "./users/acc.js";
 import deleteRoutes from "./system/delete.js";
@@ -89,6 +90,7 @@ export default function registerAllRoutes(app, supabase) {
     contactsRoutes(app, supabase);
     globalSearchRoutes(app, supabase);
     chatRoutes(app, supabase);
+    sharedEntityRoutes(app, supabase);
     adminRoutes(app, supabase);
     accRoutes(app, supabase);
     deleteRoutes(app, supabase);
