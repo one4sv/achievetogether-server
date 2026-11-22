@@ -92,12 +92,15 @@ export default function globalSearchRoutes(app, supabase) {
             if (wants("user")) {
                 // A typed @nickname or /user can share a profile outside this conversation.
                 // The same server ACL used for card rendering is applied before disclosing a result.
-                const {data: candidates,error:searchError} = query
-                    ? await supabase.from("users").select("id,nick,username")
-                        .or("nick.ilike." + like + ",username.ilike." + like)
-                        .is("deletion_requested_at",null).limit(40)
-                    : {data:(people || []).slice(0,40),error:null};
-                if (searchError) throw searchError;
+                const searched = query ? await Promise.all([
+                    supabase.from("users").select("id,nick,username")
+                        .ilike("nick",like).is("deletion_requested_at",null).limit(40),
+                    supabase.from("users").select("id,nick,username")
+                        .ilike("username",like).is("deletion_requested_at",null).limit(40)
+                ]) : [];
+                if (searched.some(response => response.error)) throw searched.find(response => response.error).error;
+                const candidates = query ? [...new Map(searched.flatMap(response => response.data || [])
+                    .map(person => [person.id,person])).values()].slice(0,60) : (people || []).slice(0,40);
                 for (const person of candidates || []) {
                     const visible = await sharedEntityPreview(supabase,"user",person.id,actor);
                     if (visible) add(result("user", person.id,visible.name,visible.url,"@" + person.nick));
