@@ -13,15 +13,15 @@ export function parseGlobalQuery(input) {
     if (text.startsWith("/") && !match) return null;
     const filter = match?.[1] || "every";
     const query = (match ? (match[2] || "") : text).trim();
-    if ((!query && !["user","habit","plan","post","group"].includes(filter)) ||
+    if ((!query && !["user","habit","plan","post","group","ms","new"].includes(filter)) ||
         query.length > 100 || query.includes("\0")) return null;
     return { filter, query, like: "%" + query.replace(/[\\%_]/g, "\\$&") + "%" };
 }
 const LIMIT = 20;
 const idOf = value => String(value ?? "");
 const safeText = value => String(value || "").replace(/[\r\n]+/g, " ").trim().slice(0, 150);
-const result = (kind, id, label, url, description = "", date = "") =>
-    ({ kind, id: String(id), label: safeText(label), description: safeText(description), url, date });
+const result = (kind, id, label, url, description = "", date = "", visual = {}) =>
+    ({ kind, id: String(id), label: safeText(label), description: safeText(description), url, date, ...visual });
 
 export default function globalSearchRoutes(app, supabase) {
     app.get("/search/global", authenticateUser(supabase), async (req, res) => {
@@ -106,7 +106,8 @@ export default function globalSearchRoutes(app, supabase) {
                     .map(person => [person.id,person])).values()].slice(0,60) : (people || []).slice(0,40);
                 for (const person of candidates || []) {
                     const visible = await sharedEntityPreview(supabase,"user",person.id,actor);
-                    if (visible) add(result("user", person.id,visible.name,visible.url,"@" + person.nick));
+                    if (visible) add(result("user", person.id,visible.name,visible.url,"@" + person.nick, "",
+                        { avatar_url: visible.avatar_url || null }));
                 }
             }
             if (wants("habit")) {
@@ -117,7 +118,8 @@ export default function globalSearchRoutes(app, supabase) {
                 if (error) throw error;
                 for (const habit of data || []) {
                     const access = await getHabitAccess(supabase, habit.id, actor);
-                    if (access?.can_view) add(result("habit", habit.id, habit.name, "/habit/" + habit.id, "", habit.created_at));
+                    if (access?.can_view) add(result("habit", habit.id, habit.name, "/habit/" + habit.id, "", habit.created_at,
+                        { tag: access.habit?.tag || null }));
                 }
             }
             if (wants("plan")) {
@@ -131,14 +133,15 @@ export default function globalSearchRoutes(app, supabase) {
                 const ids = [...new Set([...(owned || []).map(x => x.id), ...(memberships || []).map(x => x.plan_id)])];
                 if (ids.length) {
                     let plansQuery = supabase.from("one_off_plans")
-                        .select("id,name,owner_id,plan_date").in("id", ids).ilike("name", like);
+                        .select("id,name,owner_id,plan_date,tag").in("id", ids).ilike("name", like);
                     if (linkToChat) plansQuery = plansQuery.eq("owner_id", actor)
                         .eq("status", "upcoming").is("chat_id", null);
                     const { data, error } = await plansQuery.limit(80);
                     if (error) throw error;
                     for (const plan of data || []) {
                         if (plan.owner_id !== actor && (await relationship(supabase, actor, plan.owner_id)).blocked) continue;
-                        add(result("plan", plan.id, plan.name, "/plan/" + plan.id, plan.plan_date, plan.plan_date));
+                        add(result("plan", plan.id, plan.name, "/plan/" + plan.id, plan.plan_date, plan.plan_date,
+                            { tag: plan.tag || null }));
                     }
                 }
             }
