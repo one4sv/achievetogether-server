@@ -4,18 +4,19 @@ import { ownerPrivacy, relationship, permitted } from "./privacy.js";
 
 export function postCardExcerpt(text) {
     if (typeof text !== "string") return "";
+    const maxLength = 700;
     try {
         const data = JSON.parse(text);
-        if (data?.type !== "doc") return text.slice(0, 220);
+        if (data?.type !== "doc") return text.replace(/\s+/g, " ").slice(0, maxLength);
         const parts = [];
         const walk = node => {
-            if (parts.join("").length > 250) return;
+            if (parts.join("").length > maxLength) return;
             if (node?.type === "text" && typeof node.text === "string") parts.push(node.text);
             if (Array.isArray(node?.content)) node.content.forEach(walk);
         };
         walk(data);
-        return parts.join(" ").replace(/\s+/g, " ").slice(0, 220);
-    } catch { return text.replace(/\s+/g, " ").slice(0, 220); }
+        return parts.join(" ").replace(/\s+/g, " ").slice(0, maxLength);
+    } catch { return text.replace(/\s+/g, " ").slice(0, maxLength); }
 }
 export function validEntityReference(kind,id) {
     if (!["user","habit","plan","post","group"].includes(kind)) return false;
@@ -39,7 +40,8 @@ export async function sharedEntityPreview(supabase,kind,id,viewerId) {
             .select("nick,username,avatar_url").eq("id",post.user_id).maybeSingle();
         if (authorError) throw authorError;
         return {kind,id,name:author?.username || author?.nick || "Post",
-            author:author?.username || author?.nick || "",avatar_url:author?.avatar_url || null,
+            author:author?.username || author?.nick || "",author_nick:author?.nick || null,
+            avatar_url:author?.avatar_url || null,
             excerpt:postCardExcerpt(post.text),url:"/post/"+id};
     }
     if (kind === "user") {
