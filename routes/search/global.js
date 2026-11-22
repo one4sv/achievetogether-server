@@ -179,7 +179,9 @@ export default function globalSearchRoutes(app, supabase) {
                     }
                 }
             }
-            results.sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+            const prioritizeMine = ["habit", "plan", "post"].includes(filter);
+            results.sort((a, b) => prioritizeMine && a.mine !== b.mine
+                ? (a.mine ? -1 : 1) : (b.date || "").localeCompare(a.date || ""));
             return res.json({ success: true, filter, query, items: results.slice(0, LIMIT),
                 hasMore: results.length > LIMIT });
         } catch (error) {
