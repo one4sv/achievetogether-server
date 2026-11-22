@@ -13,6 +13,7 @@ test("post preview reads rich text without JSON or markup", () => {
 test("explicit share commands list current accessible entities without extra typing", () => {
     for(const type of ["user","habit","plan","post","group"])
         assert.deepEqual(parseGlobalQuery("/"+type).filter,type);
-    assert.equal(parseGlobalQuery("/ms"),null);
+    assert.deepEqual(parseGlobalQuery("/ms"), {filter:"ms",query:"",like:"%%"});
+    assert.deepEqual(parseGlobalQuery("/new"), {filter:"new",query:"",like:"%%"});
     assert.equal(parseGlobalQuery("/every"),null);
 });
