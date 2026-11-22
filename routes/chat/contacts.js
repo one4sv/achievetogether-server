@@ -169,7 +169,9 @@ export default function (app, supabase) {
           show_names,
           is_system,
           is_pinned,
-          target_id
+          target_id,
+          entity_type,
+          entity_id
         `)
         .in("chat_id", relevantChatIds)
         .not("hidden", "cs", `{"${currentUserId}"}`)

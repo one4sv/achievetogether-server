@@ -2,6 +2,21 @@ import { getHabitAccess } from "./habitAccess.js";
 import { readablePost } from "./postContent.js";
 import { ownerPrivacy, relationship, permitted } from "./privacy.js";
 
+export function postCardExcerpt(text) {
+    if (typeof text !== "string") return "";
+    try {
+        const data = JSON.parse(text);
+        if (data?.type !== "doc") return text.slice(0, 220);
+        const parts = [];
+        const walk = node => {
+            if (parts.join("").length > 250) return;
+            if (node?.type === "text" && typeof node.text === "string") parts.push(node.text);
+            if (Array.isArray(node?.content)) node.content.forEach(walk);
+        };
+        walk(data);
+        return parts.join(" ").replace(/\s+/g, " ").slice(0, 220);
+    } catch { return text.replace(/\s+/g, " ").slice(0, 220); }
+}
 export function validEntityReference(kind,id) {
     if (!["user","habit","plan","post","group"].includes(kind)) return false;
     if (typeof id !== "string" || id.length > 48) return false;
@@ -13,11 +28,19 @@ export async function sharedEntityPreview(supabase,kind,id,viewerId) {
     if (kind === "habit") {
         const access = await getHabitAccess(supabase,id,viewerId);
         if (!access?.can_view) return null;
-        return {kind,id,name:access.habit.name,subtitle:access.habit.periodicity || "",url:"/habit/"+id};
+        return {kind,id,name:access.habit.name,periodicity:access.habit.periodicity || "",
+            tag:access.habit.tag || null,start_time:access.habit.start_time || null,
+            end_time:access.habit.end_time || null,url:"/habit/"+id};
     }
     if (kind === "post") {
         const post = await readablePost(supabase,id,viewerId);
-        return post ? {kind,id,name:String(post.text || "").slice(0,160) || "Post",subtitle:"",url:"/post/"+id} : null;
+        if (!post) return null;
+        const {data:author,error:authorError} = await supabase.from("users")
+            .select("nick,username,avatar_url").eq("id",post.user_id).maybeSingle();
+        if (authorError) throw authorError;
+        return {kind,id,name:author?.username || author?.nick || "Post",
+            author:author?.username || author?.nick || "",avatar_url:author?.avatar_url || null,
+            excerpt:postCardExcerpt(post.text),url:"/post/"+id};
     }
     if (kind === "user") {
         const {data:person,error} = await supabase.from("users").select("id,nick,username,avatar_url")
@@ -53,5 +76,7 @@ export async function sharedEntityPreview(supabase,kind,id,viewerId) {
             contact:rel.contact,blocked:rel.blocked,override:plan.visibility,token:plan.share_token});
         if (member?.status !== "accepted" && !publicAccess) return null;
     }
-    return {kind,id,name:plan.name,subtitle:plan.plan_date || "",url:"/plan/"+id};
+    return {kind,id,name:plan.name,plan_date:plan.plan_date || null,
+        start_time:plan.start_time || null,end_time:plan.end_time || null,
+        tag:plan.tag || null,url:"/plan/"+id};
 }

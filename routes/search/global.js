@@ -2,6 +2,7 @@ import { authenticateUser } from "../../middleware/token.js";
 import { canAccessMessage } from "../../utils/messageAccess.js";
 import { getHabitAccess } from "../../utils/habitAccess.js";
 import { relationship } from "../../utils/privacy.js";
+import { sharedEntityPreview } from "../../utils/sharedEntity.js";
 import { readablePost, visiblePosts } from "../../utils/postContent.js";
 
 export const searchCategories = new Set(["ms", "com", "post", "user", "habit", "plan", "group", "every", "new"]);
@@ -12,7 +13,8 @@ export function parseGlobalQuery(input) {
     if (text.startsWith("/") && !match) return null;
     const filter = match?.[1] || "every";
     const query = (match ? (match[2] || "") : text).trim();
-    if (!query || query.length > 100 || query.includes("\0")) return null;
+    if ((!query && !["user","habit","plan","post","group"].includes(filter)) ||
+        query.length > 100 || query.includes("\0")) return null;
     return { filter, query, like: "%" + query.replace(/[\\%_]/g, "\\$&") + "%" };
 }
 const LIMIT = 20;
@@ -87,9 +89,19 @@ export default function globalSearchRoutes(app, supabase) {
                 chat.name?.toLocaleLowerCase().includes(query.toLocaleLowerCase()))) {
                 add(result("group", chat.id, chat.name, destination.get(idOf(chat.id))));
             }
-            if (wants("user")) for (const person of people || []) {
-                if (![person.nick, person.username].some(value => value?.toLocaleLowerCase().includes(query.toLocaleLowerCase()))) continue;
-                add(result("user", person.id, person.username || person.nick, "/acc/" + encodeURIComponent(person.nick), "@" + person.nick));
+            if (wants("user")) {
+                // A typed @nickname or /user can share a profile outside this conversation.
+                // The same server ACL used for card rendering is applied before disclosing a result.
+                const {data: candidates,error:searchError} = query
+                    ? await supabase.from("users").select("id,nick,username")
+                        .or("nick.ilike." + like + ",username.ilike." + like)
+                        .is("deletion_requested_at",null).limit(40)
+                    : {data:(people || []).slice(0,40),error:null};
+                if (searchError) throw searchError;
+                for (const person of candidates || []) {
+                    const visible = await sharedEntityPreview(supabase,"user",person.id,actor);
+                    if (visible) add(result("user", person.id,visible.name,visible.url,"@" + person.nick));
+                }
             }
             if (wants("habit")) {
                 const { data, error } = await supabase.from("habits").select("id,name,created_at")
