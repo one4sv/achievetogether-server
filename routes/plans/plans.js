@@ -9,7 +9,7 @@ const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const MODES = ["personal", "shared"];
 const CHOICES = ["inherit", "nobody", "contacts", "all", "link"];
 const JOINS = ["invite", "request", "open"];
-const TAGS = new Set(["coding","paint","photo","music","games","dice","sleep","walking","food","hockey","cycling","skiing","snowboarding","swimming","pingpong","tennis","bowling","boxing","basketball","running","football","strategy","volleyball","yoga ","sport","study","work"]);
+const TAGS = new Set(["coding","paint","photo","music","games","dice","health","sleep","walking","food","hockey","cycling","skiing","snowboarding","swimming","pingpong","tennis","bowling","boxing","basketball","running","football","strategy","volleyball","yoga ","sport","study","work"]);
 
 function isDate(value) {
     if (typeof value !== "string" || !DATE.test(value)) return false;
