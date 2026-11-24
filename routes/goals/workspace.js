@@ -160,12 +160,14 @@ export default function goalWorkspaceRoutes(app,supabase) {
                     if(!links?.length) return invalid(res);
                 }
             }
-            const {data:goal,error}=await supabase.rpc("at_update_goal_and_links",{
+            const {data:updatedGoal,error}=await supabase.rpc("at_update_goal_and_links",{
                 p_goal_id:old.id,p_owner:req.user.id,p_fields:input,
                 p_habit_ids:habit_ids===undefined?null:[...new Set(habit_ids.map(Number))],
                 p_plan_ids:plan_ids===undefined?null:[...new Set(plan_ids.map(Number))]
             });
             if(error) throw error;
+            const goal=Array.isArray(updatedGoal)?updatedGoal[0]:updatedGoal;
+            if(!goal?.id) throw new Error("Goal update returned no row");
             await event(supabase,goal.id,req.user.id,"updated",{
                 status:goal.status,progress_mode:goal.progress_mode
             });
