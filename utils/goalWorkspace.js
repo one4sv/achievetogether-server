@@ -1,4 +1,6 @@
-const modes = new Set(["manual", "metric", "milestones", "combined"]);
+import { isAutomaticMode, validTrackingZone } from "./goalTracking.js";
+
+const modes = new Set(["manual", "metric", "milestones", "combined", "days", "streak", "daily_timer"]);
 const statuses = new Set(["active", "paused", "completed", "canceled", "archived"]);
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const validNumber = value => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1000000000;
@@ -14,7 +16,8 @@ export function validGoalDate(value) {
 export function validateGoal(body, old = null) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const keys = ["name", "description", "due_date", "progress_mode", "status",
-        "manual_progress", "metric_start", "metric_target", "metric_current", "metric_unit", "metric_share"];
+        "manual_progress", "metric_start", "metric_target", "metric_current", "metric_unit", "metric_share",
+        "tracking_habit_id", "tracking_days", "tracking_minutes", "tracking_start", "tracking_timezone"];
     if (!Object.keys(body).length || Object.keys(body).some(key => !keys.includes(key))) return null;
     const v = { ...body };
     if ("name" in v) {
@@ -32,9 +35,16 @@ export function validateGoal(body, old = null) {
     }
     if ("manual_progress" in v && (v.manual_progress < 0 || v.manual_progress > 100)) return null;
     if ("metric_share" in v && (v.metric_share < 0 || v.metric_share > 1)) return null;
+    if ("tracking_habit_id" in v && v.tracking_habit_id !== null &&
+        (!Number.isSafeInteger(v.tracking_habit_id) || v.tracking_habit_id <= 0)) return null;
+    if ("tracking_days" in v && (!Number.isInteger(v.tracking_days) || v.tracking_days < 1 || v.tracking_days > 3660)) return null;
+    if ("tracking_minutes" in v && (!Number.isInteger(v.tracking_minutes) || v.tracking_minutes < 1 || v.tracking_minutes > 1440)) return null;
+    if ("tracking_start" in v && !validGoalDate(v.tracking_start)) return null;
+    if ("tracking_timezone" in v && !validTrackingZone(v.tracking_timezone)) return null;
     const merged = { progress_mode:"manual",metric_start:0,metric_target:100,metric_current:0,
         ...old,...v };
     if (["metric","combined"].includes(merged.progress_mode) && merged.metric_target === merged.metric_start) return null;
+    if (isAutomaticMode(merged.progress_mode) && (!merged.tracking_habit_id || !merged.tracking_start)) return null;
     return v;
 }
 export function validateGoalStage(body, creating = true) {
@@ -50,7 +60,7 @@ export function validateGoalStage(body, creating = true) {
     if (creating && "completed" in v) return null;
     return v;
 }
-export function goalProgress(goal, stages = []) {
+export function goalProgress(goal, stages = [], trackedDays = 0) {
     const manual = clamp(Number(goal.manual_progress ?? 0));
     const start = Number(goal.metric_start ?? 0), target = Number(goal.metric_target ?? 100);
     const current = Number(goal.metric_current ?? start);
@@ -59,7 +69,7 @@ export function goalProgress(goal, stages = []) {
     const done = stages.reduce((sum,s) => sum + (s.completed_at ? Number(s.weight ?? 1) : 0),0);
     const milestones = total > 0 ? clamp(done / total * 100) : 0;
     const mode = goal.progress_mode || "manual";
-    const amount = mode === "metric" ? metric : mode === "milestones" ? milestones :
+    const amount = isAutomaticMode(mode) ? clamp(trackedDays / Math.max(1, Number(goal.tracking_days || 1)) * 100) : mode === "metric" ? metric : mode === "milestones" ? milestones :
         mode === "combined" ? metric * Number(goal.metric_share ?? 0.5) +
             milestones * (1 - Number(goal.metric_share ?? 0.5)) : manual;
     return Math.round(clamp(amount) * 100) / 100;
