@@ -8,12 +8,15 @@ const outsider="22222222-2222-4222-8222-222222222222";
 function mock() {
     let writes=0;
     const rows={at_goals:[{id:1,owner_id:owner,name:"Private result",description:"PRIVATE GOAL DESCRIPTION",
-        progress_mode:"manual",manual_progress:20}],at_goal_stages:[]};
+        progress_mode:"manual",manual_progress:20}],at_goal_stages:[],at_goal_habit_links:[{goal_id:1,habit_id:7}]};
     const supabase={from(table){
         const filters=[];
         const query={
             select(){return query;},
             eq(key,value){filters.push(row=>String(row[key])===String(value));return query;},
+            order(){return query;},
+            in(key,values){filters.push(row=>values.some(value=>String(row[key])===String(value)));return query;},
+            then(resolve,reject){return Promise.resolve({data:(rows[table] || []).filter(row=>filters.every(f=>f(row))),error:null}).then(resolve,reject);},
             maybeSingle(){return Promise.resolve({data:(rows[table] || []).find(row=>
                 filters.every(f=>f(row))) || null,error:null});},
             insert(){writes++;return query;},
@@ -64,4 +67,15 @@ test("anonymous requests and owner injection are rejected",async()=>{
     assert.equal((await app.call("POST","/goal-workspace",owner,{name:"Goal",owner_id:outsider})).status,400);
     assert.equal((await app.call("POST","/goal-workspace/:id/links",owner,{kind:"plan",id:"nan"})).status,400);
     assert.equal(app.writes(),0);
+});
+
+test("workspace list exposes activity links only for the goal owner",async()=>{
+    const app=mock();
+    const own=await app.call("GET","/goal-workspace",owner);
+    assert.equal(own.status,200);
+    assert.deepEqual(own.payload.goals.map(g=>({id:g.id,habit_ids:g.habit_ids,progress:g.progress})),[{id:1,habit_ids:[7],progress:20}]);
+    const other=await app.call("GET","/goal-workspace",outsider);
+    assert.equal(other.status,200);
+    assert.deepEqual(other.payload.goals,[]);
+    assert.equal((await app.call("GET","/goal-workspace",null)).status,401);
 });
