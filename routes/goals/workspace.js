@@ -97,12 +97,13 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 stages=result.data || [];
             }
             return res.json({success:true,goals:await Promise.all(goals.map(async g=>{
+                const {data:links,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",g.id);
+                if(error) throw error;
+                const habit_ids=(links || []).map(l=>l.habit_id);
                 if(automaticMode(g.progress_mode)){
-                    const {data:links,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",g.id);
-                    if(error) throw error;
-                    return {...g,...await readActivityProgress(supabase,g,(links || []).map(l=>l.habit_id))};
+                    return {...g,habit_ids,...await readActivityProgress(supabase,g,habit_ids)};
                 }
-                return {...g,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)))};
+                return {...g,habit_ids,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)))};
             }))});
         }catch(error){return fail(res,error);}
     });
