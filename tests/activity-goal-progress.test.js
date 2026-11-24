@@ -34,3 +34,13 @@ test("undo and schedule changes recompute rather than accumulate cached progress
     assert.equal(activityGoalProgress(g,[h],completed.slice(0,1),[],[],"2026-11-24").progress,50);
     assert.equal(activityGoalProgress(g,[{...h,chosen_days:[3]}],completed,[],[],"2026-11-24").progress,0);
 });
+
+test("total timer accumulates ended sessions across days, excludes pauses and clips deadline",()=>{
+    const goal={...g,progress_mode:"total_timer",metric_target:240,due_date:"2026-11-21"};
+    const timer={habit_id:1,status:"ended",started_at:"2026-11-20T23:00:00+03:00",end_at:"2026-11-21T02:00:00+03:00",pauses:[{start:"2026-11-21T00:00:00+03:00",end:"2026-11-21T01:00:00+03:00"}]};
+    const late={...timer,started_at:"2026-11-21T23:00:00+03:00",end_at:"2026-11-22T02:00:00+03:00",pauses:[]};
+    const running={...timer,status:"running"};
+    const result=activityGoalProgress(goal,[h],[],[],[timer,late,running,{...timer,habit_id:2}],"2026-11-22",[],"Europe/Moscow",Date.parse("2026-11-22T12:00:00+03:00"));
+    assert.equal(result.achieved_minutes,180);
+    assert.equal(result.progress,75);
+});

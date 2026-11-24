@@ -1,4 +1,4 @@
-const modes = new Set(["manual", "metric", "milestones", "combined", "days", "streak", "daily_timer", "daily_counter"]);
+const modes = new Set(["manual", "metric", "milestones", "combined", "days", "streak", "daily_timer", "daily_counter", "total_timer"]);
 const statuses = new Set(["active", "paused", "completed", "canceled", "archived"]);
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const validNumber = value => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1000000000;
@@ -39,18 +39,20 @@ export function validateGoal(body, old = null) {
     const merged = { progress_mode:"manual",metric_start:0,metric_target:100,metric_current:0,
         ...old,...v };
     if (merged.progress_mode === "daily_counter" && (!Number.isInteger(Number(merged.metric_target)) || Number(merged.metric_target) < 1 || Number(merged.metric_target) > 1000000000)) return null;
+    if (merged.progress_mode === "total_timer" && (!Number.isInteger(Number(merged.metric_target)) || Number(merged.metric_target) < 1 || Number(merged.metric_target) > 1000000000)) return null;
     if (["metric","combined"].includes(merged.progress_mode) && merged.metric_target === merged.metric_start) return null;
     return v;
 }
 export function validateGoalStage(body, creating = true) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-    const keys = ["title", "weight", "completed"];
+    const keys = ["title", "weight", "completion_percent", "completed"];
     if (!Object.keys(body).length || Object.keys(body).some(k => !keys.includes(k))) return null;
     const v = { ...body };
     if (creating && !("title" in v)) return null;
     if ("title" in v && (typeof v.title !== "string" || !v.title.trim() || v.title.length > 160)) return null;
     if ("title" in v) v.title = v.title.trim();
     if ("weight" in v && (!validNumber(v.weight) || v.weight < 0.001 || v.weight > 10000)) return null;
+    if ("completion_percent" in v && (!validNumber(v.completion_percent) || v.completion_percent < 0 || v.completion_percent > 100)) return null;
     if ("completed" in v && typeof v.completed !== "boolean") return null;
     if (creating && "completed" in v) return null;
     return v;
@@ -62,7 +64,18 @@ export function goalProgress(goal, stages = []) {
     const metric = target === start ? 0 : clamp((current - start) / (target - start) * 100);
     const total = stages.reduce((sum,s) => sum + Number(s.weight ?? 1),0);
     const done = stages.reduce((sum,s) => sum + (s.completed_at ? Number(s.weight ?? 1) : 0),0);
-    const milestones = total > 0 ? clamp(done / total * 100) : 0;
+    let milestones = total > 0 ? clamp(done / total * 100) : 0;
+    if(stages.some(s=>s.completion_percent!=null)) {
+        // Explicit milestones mark the percentage achieved upon completion; legacy weights remain readable.
+        let cumulative=0;
+        milestones=0;
+        for(const stage of [...stages].sort((a,b)=>Number(a.position ?? 0)-Number(b.position ?? 0) || Number(a.id ?? 0)-Number(b.id ?? 0))) {
+            cumulative+=Number(stage.weight ?? 1);
+            const percent=stage.completion_percent==null ? (total>0?cumulative/total*100:0) : Number(stage.completion_percent);
+            if(stage.completed_at) milestones=Math.max(milestones,percent);
+        }
+        milestones=clamp(milestones);
+    }
     const mode = goal.progress_mode || "manual";
     const amount = mode === "metric" ? metric : mode === "milestones" ? milestones :
         mode === "combined" ? metric * Number(goal.metric_share ?? 0.5) +

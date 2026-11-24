@@ -16,7 +16,7 @@ async function refreshDirty(supabase){
             if(goal){
                 const [links,stages,zone]=await Promise.all([
                     rows(supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",goal.id)),
-                    rows(supabase.from("at_goal_stages").select("weight,completed_at").eq("goal_id",goal.id)),
+                    rows(supabase.from("at_goal_stages").select("id,position,weight,completion_percent,completed_at").eq("goal_id",goal.id)),
                     ownerGoalZone(supabase,goal.owner_id)
                 ]);
                 await calculateGoalProgress(supabase,goal,links.map(l=>l.habit_id),stages,zone);

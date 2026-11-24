@@ -24,3 +24,14 @@ test("stage weight is positive and completion is not accepted at creation",()=>{
     assert.equal(validateGoalStage({title:"Step",weight:0}),null);
     assert.equal(validateGoalStage({title:"Step",completed:true}),null);
 });
+
+test("explicit milestones set achieved percentages without normalizing by weights",()=>{
+    const stages=[{id:1,position:0,weight:1,completion_percent:60,completed_at:"2026-11-24"},{id:2,position:1,weight:1,completion_percent:100,completed_at:null}];
+    assert.equal(goalProgress({progress_mode:"milestones"},stages),60);
+    assert.equal(goalProgress({progress_mode:"milestones"},[{...stages[0],completed_at:null},{...stages[1],completed_at:"2026-11-24"}]),100);
+    assert.equal(goalProgress({progress_mode:"combined",metric_start:0,metric_target:100,metric_current:40,metric_share:0.5},stages),50);
+    assert.equal(validateGoalStage({title:"Step",completion_percent:60}).completion_percent,60);
+    assert.equal(validateGoalStage({title:"Step",completion_percent:101}),null);
+    assert.equal(validateGoal({name:"Timer",progress_mode:"total_timer",metric_target:0}),null);
+    assert.equal(validateGoal({name:"Timer",progress_mode:"total_timer",metric_target:600}).metric_target,600);
+});

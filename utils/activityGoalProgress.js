@@ -1,5 +1,6 @@
 // Civil completion dates are preserved; absolute timestamps use the goal owner timezone.
-export const automaticMode = mode => ["days","streak","daily_timer","daily_counter"].includes(mode);
+export const automaticMode = mode => ["days","streak","daily_timer","daily_counter","total_timer"].includes(mode);
+export const requiredHabitMetric = mode => mode==="daily_timer" || mode==="total_timer" ? "timer" : mode==="daily_counter" ? "counter" : null;
 export function validZone(value){
     if(typeof value!=="string" || value.length>100) return false;
     try{new Intl.DateTimeFormat("en-US",{timeZone:value});return true;}catch{return false;}
@@ -52,9 +53,8 @@ export function scheduled(habit,date,planned,done) {
     return habit.periodicity==="sometimes" && (planned.has(key(habit.id,date)) || done.has(key(habit.id,date)));
 }
 
-export function timerSeconds(timer,date,zone="Europe/Moscow",now=Date.now(),includeRunning=false) {
+function timerSecondsInRange(timer,begin,end,now=Date.now(),includeRunning=false) {
     if(timer.status!=="ended" && !includeRunning) return 0;
-    const begin=dayStart(date,zone), end=dayStart(nextDay(date),zone);
     const stop=timer.status==="ended"?Date.parse(timer.end_at):now;
     const left=Math.max(begin,Date.parse(timer.started_at)), right=Math.min(end,stop);
     if(!Number.isFinite(left) || !Number.isFinite(right) || right<=left) return 0;
@@ -66,10 +66,22 @@ export function timerSeconds(timer,date,zone="Europe/Moscow",now=Date.now(),incl
     return Math.max(0,right-left-lost)/1000;
 }
 
+export function timerSeconds(timer,date,zone="Europe/Moscow",now=Date.now(),includeRunning=false) {
+    return timerSecondsInRange(timer,dayStart(date,zone),dayStart(nextDay(date),zone),now,includeRunning);
+}
+
 export function activityGoalProgress(goal,habits,completions,plans,timers,today=goalDay(new Date()),counters=[],zone="Europe/Moscow",now=Date.now()) {
     const target=Number(goal.target_days || 1);
     const start=goalDay(goal.created_at,zone);
     const end=goal.due_date && goal.due_date<today ? goal.due_date : today;
+    if(goal.progress_mode==="total_timer") {
+        const targetSeconds=Number(goal.metric_target)*60;
+        if(!habits.length || start>end || !(targetSeconds>0)) return {progress:0,achieved_minutes:0};
+        const ids=new Set(habits.map(h=>String(h.id)));
+        const begin=dayStart(start,zone), finish=Math.min(now,dayStart(nextDay(end),zone));
+        const seconds=timers.filter(timer=>ids.has(String(timer.habit_id))).reduce((sum,timer)=>sum+timerSecondsInRange(timer,begin,finish,now),0);
+        return {progress:Math.min(100,Math.round(seconds/targetSeconds*10000)/100),achieved_minutes:Math.round(seconds/60*100)/100};
+    }
     const done=new Set(completions.map(row=>key(row.habit_id,row.completed_at)));
     const planned=new Set(plans.map(row=>key(row.habit_id,row.planned_at)));
     const byHabit=new Map();
@@ -116,9 +128,14 @@ async function allRows(makeQuery) {
 export async function readActivityProgress(supabase,goal,habitIds,zone="Europe/Moscow") {
     if(!habitIds.length) return {progress:0,achieved_days:0};
     const {data:habits,error}=await supabase.from("habits")
-        .select("id,start_date,end_date,periodicity,chosen_days,cycle_days_active,cycle_days_rest")
+        .select("id,start_date,end_date,periodicity,chosen_days,cycle_days_active,cycle_days_rest,habits_settings(metric_type)")
         .eq("user_id",goal.owner_id).in("id",habitIds);
     if(error) throw error;
+    const required=requiredHabitMetric(goal.progress_mode);
+    if(required && (habits || []).some(h=>{
+        const settings=Array.isArray(h.habits_settings)?h.habits_settings[0]:h.habits_settings;
+        return settings?.metric_type!==required;
+    })) return {progress:0,achieved_days:0,achieved_minutes:0};
     const ids=(habits || []).map(h=>h.id);
     if(!ids.length) return {progress:0,achieved_days:0};
     const start=goalDay(goal.created_at,zone),today=goalDay(new Date(),zone);
@@ -126,7 +143,7 @@ export async function readActivityProgress(supabase,goal,habitIds,zone="Europe/M
     const [completed,planned,timers,counters]=await Promise.all([
         allRows(()=>supabase.from("habit_completions").select("id,habit_id,completed_at").eq("user_id",goal.owner_id).in("habit_id",ids).gte("completed_at",start).lte("completed_at",today)),
         allRows(()=>supabase.from("habit_planned").select("id,habit_id,planned_at").in("habit_id",ids).gte("planned_at",start).lte("planned_at",today)),
-        goal.progress_mode==="daily_timer"?allRows(()=>supabase.from("habit_timers").select("id,habit_id,started_at,end_at,status,pauses").eq("user_id",goal.owner_id).in("habit_id",ids).or("end_at.gte."+from+",status.in.(running,paused)")):Promise.resolve([]),
+        required==="timer"?allRows(()=>supabase.from("habit_timers").select("id,habit_id,started_at,end_at,status,pauses").eq("user_id",goal.owner_id).in("habit_id",ids).or("end_at.gte."+from+",status.in.(running,paused)")):Promise.resolve([]),
         goal.progress_mode==="daily_counter"?allRows(()=>supabase.from("habit_counters").select("id,habit_id,created_at,count").eq("user_id",goal.owner_id).in("habit_id",ids).gte("created_at",from)):Promise.resolve([])
     ]);
     return activityGoalProgress(goal,habits || [],completed,planned,timers,today,counters,zone);

@@ -1,7 +1,7 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalWorkspace.js";
 
-import { automaticMode, readActivityProgress, ownerGoalZone, goalDay } from "../../utils/activityGoalProgress.js";
+import { automaticMode, readActivityProgress, ownerGoalZone, goalDay, requiredHabitMetric } from "../../utils/activityGoalProgress.js";
 
 const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
 const targets = {
@@ -91,6 +91,14 @@ async function allowOwnTarget(supabase,kind,targetId,userId,existingGoalId=null)
 }
 
 const validIds = ids => Array.isArray(ids) && ids.length <= 40 && ids.every(validId);
+async function validateHabitMetric(supabase,mode,ids){
+    const required=requiredHabitMetric(mode);
+    if(!required) return true;
+    if(!ids.length) return false;
+    const {data,error}=await supabase.from("habits_settings").select("habit_id,metric_type").in("habit_id",ids);
+    if(error) throw error;
+    return ids.every(id=>(data || []).some(s=>String(s.habit_id)===String(id) && s.metric_type===required));
+}
 async function validateLinks(supabase,userId,kind,ids,existingGoalId=null){
     for(const id of ids) if(!await allowOwnTarget(supabase,kind,id,userId,existingGoalId)) return false;
     return true;
@@ -107,7 +115,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const goals=data || [];
             let stages=[];
             if(goals.length){
-                const result=await supabase.from("at_goal_stages").select("goal_id,weight,completed_at")
+                const result=await supabase.from("at_goal_stages").select("id,goal_id,position,weight,completion_percent,completed_at")
                     .in("goal_id",goals.map(g=>g.id));
                 if(result.error) throw result.error;
                 stages=result.data || [];
@@ -139,6 +147,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
         if(initialStages.some(stage=>!stage)) return invalid(res);
         try {
             if(!await validateLinks(supabase,req.user.id,"habit",hIds) || !await validateLinks(supabase,req.user.id,"plan",pIds)) return missing(res);
+            if(!await validateHabitMetric(supabase,input.progress_mode,hIds)) return invalid(res);
             const {data:goal,error}=await supabase.from("at_goals").insert({
                 ...input,owner_id:req.user.id,metric_current:input.metric_current ??
                     input.metric_start ?? 0
@@ -147,7 +156,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             try {
                 if(initialStages.length){
                     const created=await supabase.from("at_goal_stages").insert(initialStages.map((s,i)=>({
-                        goal_id:goal.id,title:s.title,weight:s.weight ?? 1,position:i
+                        goal_id:goal.id,title:s.title,weight:s.weight ?? 1,completion_percent:s.completion_percent ?? null,position:i
                     })));
                     if(created.error) throw created.error;
                 }
@@ -186,12 +195,14 @@ export default function goalWorkspaceRoutes(app,supabase) {
             if(habit_ids!==undefined && !await validateLinks(supabase,req.user.id,"habit",habit_ids,old.id)) return missing(res);
             if(plan_ids!==undefined && !await validateLinks(supabase,req.user.id,"plan",plan_ids,old.id)) return missing(res);
             if(automaticMode(input.progress_mode ?? old.progress_mode)){
-                if(habit_ids!==undefined && !habit_ids.length) return invalid(res);
-                if(habit_ids===undefined){
+                let ids=habit_ids;
+                if(ids===undefined){
                     const {data:links,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",old.id);
                     if(error) throw error;
-                    if(!links?.length) return invalid(res);
+                    ids=(links || []).map(l=>l.habit_id);
                 }
+                if(!ids.length) return invalid(res);
+                if((habit_ids!==undefined || input.progress_mode!==undefined) && !await validateHabitMetric(supabase,input.progress_mode ?? old.progress_mode,ids)) return invalid(res);
             }
             const {data:updatedGoal,error}=await supabase.rpc("at_update_goal_and_links",{
                 p_goal_id:old.id,p_owner:req.user.id,p_fields:input,
@@ -231,7 +242,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 .select("position").eq("goal_id",goal.id).order("position",{ascending:false}).limit(1);
             if(readError) throw readError;
             const {error}=await supabase.from("at_goal_stages").insert({
-                goal_id:goal.id,title:input.title,weight:input.weight ?? 1,
+                goal_id:goal.id,title:input.title,weight:input.weight ?? 1,completion_percent:input.completion_percent ?? null,
                 position:existing?.length ? Number(existing[0].position)+1 : 0
             });
             if(error) throw error;
@@ -290,6 +301,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             if(!goal) return missing(res);
             const target=await allowOwnTarget(supabase,body.kind,body.id,req.user.id);
             if(!target) return missing(res);
+            if(body.kind==="habit" && !await validateHabitMetric(supabase,goal.progress_mode,[target.id])) return invalid(res);
             const [,,table,idCol]=targets[body.kind];
             const {error}=await supabase.from(table).upsert({
                 goal_id:goal.id,[idCol]:target.id
