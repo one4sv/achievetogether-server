@@ -24,20 +24,23 @@ create function public.at_init_goal_repeat() returns trigger
 language plpgsql security invoker set search_path='' as $$
 declare zone text; day date; next_day date;
 begin
-    if tg_op='UPDATE' and new.repeat_frequency=old.repeat_frequency then return new; end if;
+    if tg_op='UPDATE' and new.repeat_frequency=old.repeat_frequency and new.due_date is not distinct from old.due_date then return new; end if;
     if new.repeat_frequency='none' then new.repeat_period_start:=null;new.repeat_next_at:=null;return new; end if;
     select timezone into zone from public.at_habit_reminder_preferences where user_id=new.owner_id;
     zone:=coalesce(zone,'UTC');
     day:=(now() at time zone zone)::date;
     next_day:=case new.repeat_frequency when 'daily' then day+1 when 'weekly' then (date_trunc('week',day::timestamp)+interval '7 days')::date else (date_trunc('month',day::timestamp)+interval '1 month')::date end;
+    if tg_op='UPDATE' and new.repeat_frequency=old.repeat_frequency and old.repeat_period_start is not null then day:=old.repeat_period_start; end if;
+    next_day:=case new.repeat_frequency when 'daily' then day+1 when 'weekly' then (date_trunc('week',day::timestamp)+interval '7 days')::date else (date_trunc('month',day::timestamp)+interval '1 month')::date end;
+    if new.due_date is not null then next_day:=least(next_day,new.due_date+1); end if;
     new.repeat_period_start:=day;
-    new.repeat_next_at:=next_day::timestamp at time zone zone;
+    new.repeat_next_at:=case when next_day>day then next_day::timestamp at time zone zone else null end;
     return new;
 end;
 $$;
 revoke all on function public.at_init_goal_repeat() from public,anon,authenticated;
 grant execute on function public.at_init_goal_repeat() to service_role;
-create trigger at_goal_init_repeat before insert or update of repeat_frequency on public.at_goals for each row execute function public.at_init_goal_repeat();
+create trigger at_goal_init_repeat before insert or update of repeat_frequency,due_date on public.at_goals for each row execute function public.at_init_goal_repeat();
 
 create or replace function public.at_update_goal_and_links(p_goal_id bigint,p_owner uuid,p_fields jsonb,p_habit_ids bigint[],p_plan_ids bigint[])
 returns public.at_goals language plpgsql security invoker set search_path = '' as $$
@@ -79,11 +82,16 @@ returns public.at_goals language plpgsql security invoker set search_path='' as 
 declare g public.at_goals; finished boolean;
 begin
     select * into g from public.at_goals where id=p_goal_id and owner_id=p_owner for update;
-    if not found or g.repeat_period_start is distinct from p_expected_start or g.repeat_frequency<>p_expected_frequency or g.status in ('archived','canceled') then return null; end if;
+    if not found or g.repeat_period_start is distinct from p_expected_start or g.repeat_frequency<>p_expected_frequency or g.repeat_next_at is null or g.status in ('archived','canceled') then return null; end if;
     if p_next_start<=p_expected_start or p_progress not between 0 and 100 then raise exception 'Invalid period'; end if;
     finished:=p_progress>=100 or g.status='completed';
     insert into public.at_goal_periods(goal_id,frequency,period_start,period_end,progress,completed)
         values(g.id,g.repeat_frequency,p_expected_start,p_next_start-1,p_progress,finished) on conflict(goal_id,frequency,period_start) do nothing;
+    if p_next_at is null then
+        update public.at_goals set repeat_next_at=null,last_progress=p_progress where id=g.id returning * into g;
+        insert into public.at_goal_events(goal_id,actor_id,action,details) values(g.id,p_owner,'period_closed',jsonb_build_object('start',p_expected_start,'end',p_next_start-1,'progress',p_progress,'completed',finished));
+        return g;
+    end if;
     update public.at_goal_stages set completed_at=null where goal_id=g.id and completed_at is not null;
     update public.at_goals set repeat_period_start=p_next_start,repeat_next_at=p_next_at,manual_progress=0,metric_current=metric_start,
         last_progress=0,status=case when status='completed' then 'active' else status end,auto_completed=false,completed_at=null,updated_at=now()
