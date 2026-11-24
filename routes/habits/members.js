@@ -65,6 +65,8 @@ export default function (app, supabase) {
             metric_progress_mode: ["personal", "shared"],
             completion_mode: ["personal", "shared"],
             schedule_blocks_mode: ["personal", "shared"],
+            goal_scope: ["personal", "shared"],
+            goal_completion_mode: ["personal", "shared"],
             members_can_edit_blocks: [true, false],
             members_can_edit_info: [true, false],
             members_can_invite: [true, false],
