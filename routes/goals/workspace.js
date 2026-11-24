@@ -45,6 +45,10 @@ async function event(supabase,goalId,userId,action,details = null) {
     if (error) console.error("Goal audit event:",error.code || error.message);
 }
 export async function calculateGoalProgress(supabase,goal,habitIds,stages,zone){
+    if(goal.shared_habit_id && !goal.template_goal_id){
+        const access=await getHabitAccess(supabase,goal.shared_habit_id,goal.owner_id);
+        if(access?.habit.goal_scope!=="shared" || access.habit.goal_completion_mode!=="shared")return {...goal,progress:Number(goal.last_progress ?? 0)};
+    }
     if(repeating(goal)){
         zone=await ownerGoalZone(supabase,goal.owner_id);
         ({goal,stages}=await advanceGoalPeriod(supabase,goal,habitIds,stages,zone));
@@ -152,12 +156,12 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const results=[];
             for(let i=0;i<goals.length;i+=8){
                 results.push(...await Promise.all(goals.slice(i,i+8).map(async g=>{
+                    const access=g.shared_habit_id?await sharedGoalAccess(supabase,g,req.user.id):null;
+                    if(g.shared_habit_id && !access)return null;
                     const habit_ids=(links || []).filter(l=>String(l.goal_id)===String(g.id)).map(l=>l.habit_id);
                     const ownStages=stages.filter(s=>String(s.goal_id)===String(g.id));
                     const result=await calculateGoalProgress(supabase,g,habit_ids,ownStages,zone);
                     const recentStages=ownStages.filter(s=>s.completed_at && (!result.repeat_period_start || goalDay(s.completed_at,zone)>=result.repeat_period_start)).sort((a,b)=>String(b.completed_at).localeCompare(String(a.completed_at))).slice(0,2);
-                    const access=g.shared_habit_id?await sharedGoalAccess(supabase,g,req.user.id):null;
-                    if(g.shared_habit_id && !access)return null;
                     return {...publicGoalPermissions(result,access),habit_ids,recent_stages:recentStages};
                 })));
             }
@@ -182,7 +186,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 for(let offset=0;;offset+=500){
                     const {data,error}=await supabase.from("at_goal_events").select("goal_id,action,details,created_at").in("goal_id",ids).in("action",["progress_changed","updated","auto_status"]).gte("created_at",from).lt("created_at",to).order("id").range(offset,offset+499);
                     if(error)throw error;
-                    for(const e of data || [])if((e.action==="progress_changed" && Number(e.details?.to)>=100 && (e.details?.from==null || Number(e.details.from)<100)) || (["updated","auto_status"].includes(e.action) && e.details?.status==="completed"))done.add(String(e.goal_id));
+                    for(const e of data || [])if((e.action==="progress_changed" && Number(e.details?.to)>=100 && (e.details?.from==null || Number(e.details.from)<100)) || (e.action==="auto_status" && e.details?.status==="completed") || (e.action==="updated" && e.details?.status==="completed" && e.details?.old_status && e.details.old_status!=="completed"))done.add(String(e.goal_id));
                     if(!data || data.length<500)break;
                 }
             }
@@ -289,6 +293,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const old=access.goal;
             const {habit_ids,plan_ids,...fields}=req.body || {};
             const input=validateGoal(fields,old);
+            if(!access.canProgress && input && ("manual_progress" in input || "metric_current" in input))return missing(res);
             if(!access.canEdit && (!access.canProgress || habit_ids!==undefined || plan_ids!==undefined || !validSharedProgressPatch(input)))return missing(res);
             if(!input || (habit_ids!==undefined && !validIds(habit_ids)) || (plan_ids!==undefined && !validIds(plan_ids))) return invalid(res);
             if(habit_ids!==undefined && !await validateLinks(supabase,req.user.id,"habit",habit_ids,old.id)) return missing(res);
@@ -312,7 +317,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const goal=Array.isArray(updatedGoal)?updatedGoal[0]:updatedGoal;
             if(!goal?.id) throw new Error("Goal update returned no row");
             await event(supabase,goal.id,req.user.id,"updated",{
-                status:goal.status,progress_mode:goal.progress_mode
+                status:goal.status,old_status:old.status,progress_mode:goal.progress_mode
             });
             return res.json({success:true,goal:publicGoalPermissions(await detail(supabase,goal,req.query?.timezone),access)});
         }catch(error){return fail(res,error);}
@@ -356,7 +361,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
         if(!validId(req.params.stageId) || !input) return invalid(res);
         try{
             const access=await accessible(supabase,req.params.id,req.user.id);
-            if(!access || (!access.canEdit && (!access.canProgress || Object.keys(input).some(k=>k!=="completed"))))return missing(res);
+            if(!access || ("completed" in input && !access.canProgress) || (!access.canEdit && Object.keys(input).some(k=>k!=="completed")))return missing(res);
             const goal=access.goal;
             const {data:stage,error:readError}=await supabase.from("at_goal_stages")
                 .select("*").eq("goal_id",goal.id).eq("id",req.params.stageId).maybeSingle();
