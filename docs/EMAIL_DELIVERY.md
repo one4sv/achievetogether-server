@@ -1,8 +1,10 @@
-# Настройка почтовых уведомлений AchieveTogether
+# Транзакционная почта AchieveTogether
+
+Регистрация, 2FA и восстановление доступа используют `services/sendmail.js`. Настроенный транспорт выбирается в порядке Resend, Brevo, SendGrid, Gmail. При ошибке выбранного провайдера вызывающий маршрут получает ошибку. Реальную доставку подтверждают на тестовом почтовом ящике.
 
 ## Получение refresh token в Google OAuth Playground — инструкция для AT
 
-**Уже подтверждено владельцем:** Google Cloud OAuth-проект `inbound-entity-294517`, Publishing status **In production** (скриншот от 02.11.2026). Не нажимать `Back to testing`.
+**Уже подтверждено владельцем:** Google Cloud OAuth-проект `inbound-entity-294517`, Publishing status **In production**. Не нажимать `Back to testing`.
 
 1. Открыть [Google Cloud → Clients](https://console.cloud.google.com/auth/clients?project=inbound-entity-294517). Найти **существующий Web application OAuth client**, чей Client ID совпадает со значением `GOOGLE_CLIENT_ID` в Render. Нельзя брать идентификатор другого проекта/клиента.
 2. Для этого клиента в **Authorized redirect URIs** добавить **строго** `https://developers.google.com/oauthplayground`, сохранить.
@@ -65,5 +67,3 @@
 
 - Для публичной отправки нужен **верифицированный собственный домен** (проверить DNS в Resend).
 - Free-план имеет дневные/месячные квоты: актуальные условия на https://resend.com/pricing.
-- Указанный пользователем `https://resend.com/setup.md` не удалось получить через доступные инструменты, поэтому использованы официальные [инструкции для Node.js](https://resend.com/docs/send-with-nodejs), [отправка через API](https://resend.com/docs/api-reference/emails/send-email) и [проверка домена](https://resend.com/docs/dashboard/domains/introduction).
-- Resend предоставляет MCP сервер `https://mcp.resend.com/mcp`, но для управления самим аккаунтом через ChatGPT нужно отдельно подтвердить подключение; серверу AT он не требуется.
