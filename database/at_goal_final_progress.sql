@@ -83,7 +83,7 @@ revoke all on public.at_goal_dirty from anon,authenticated;
 grant select,insert,update,delete on public.at_goal_dirty to service_role;
 
 create function public.at_queue_goal_activity() returns trigger
-language plpgsql security definer set search_path='' as $$
+language plpgsql security invoker set search_path='' as $$
 declare hid bigint;
 begin
     if TG_TABLE_NAME='habits' then
@@ -100,7 +100,7 @@ begin
 end;
 $$;
 create function public.at_queue_goal_edit() returns trigger
-language plpgsql security definer set search_path='' as $$
+language plpgsql security invoker set search_path='' as $$
 declare gid bigint;
 begin
     if TG_TABLE_NAME='at_goals' then gid:=new.id;
@@ -113,6 +113,7 @@ begin
 end;
 $$;
 revoke all on function public.at_queue_goal_activity(),public.at_queue_goal_edit() from public,anon,authenticated;
+grant execute on function public.at_queue_goal_activity(),public.at_queue_goal_edit() to service_role;
 create trigger at_goal_dirty_habit after update of periodicity,chosen_days,cycle_days_active,cycle_days_rest,start_date,end_date,ongoing on public.habits for each row execute function public.at_queue_goal_activity();
 create trigger at_goal_dirty_completion after insert or update or delete on public.habit_completions for each row execute function public.at_queue_goal_activity();
 create trigger at_goal_dirty_planned after insert or update or delete on public.habit_planned for each row execute function public.at_queue_goal_activity();

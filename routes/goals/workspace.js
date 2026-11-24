@@ -61,9 +61,11 @@ async function detail(supabase,goal,requestedZone) {
     if(habits.error || plans.error) throw habits.error || plans.error;
     const zone=await ownerGoalZone(supabase,goal.owner_id,requestedZone);
     const progress=await calculateGoalProgress(supabase,goal,habitIds,stages.data || [],zone);
+    const latest=await supabase.from("at_goal_events").select("id,action,details,created_at").eq("goal_id",goal.id).order("id",{ascending:false}).limit(30);
+    if(latest.error)throw latest.error;
     return {...progress,
         stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
-        events:events.data || []};
+        events:latest.data || []};
 }
 async function allowOwnTarget(supabase,kind,targetId,userId,existingGoalId=null) {
     const [table,ownerColumn]=targets[kind];

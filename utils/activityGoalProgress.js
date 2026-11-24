@@ -4,19 +4,29 @@ export function validZone(value){
     if(typeof value!=="string" || value.length>100) return false;
     try{new Intl.DateTimeFormat("en-US",{timeZone:value});return true;}catch{return false;}
 }
+const zoneFormatters=new Map();
 export function goalDay(value,zone="Europe/Moscow"){
-    const parts=new Intl.DateTimeFormat("en-US",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(value));
+    if(!zoneFormatters.has(zone)){
+        if(zoneFormatters.size>=64)zoneFormatters.clear();
+        zoneFormatters.set(zone,new Intl.DateTimeFormat("en-US",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit"}));
+    }
+    const parts=zoneFormatters.get(zone).formatToParts(new Date(value));
     const get=type=>parts.find(p=>p.type===type).value;
     return get("year")+"-"+get("month")+"-"+get("day");
 }
 // Binary-search the first instant of the civil day (including 23/25-hour DST days).
+const dayStarts=new Map();
 export function dayStart(date,zone){
+    const key=zone+"|"+date;
+    if(dayStarts.has(key))return dayStarts.get(key);
     const utc=Date.parse(date+"T00:00:00Z");
     let left=utc-36*3600000,right=utc+36*3600000;
     while(right-left>1){
         const mid=Math.floor((left+right)/2);
         if(goalDay(mid,zone)<date) left=mid;else right=mid;
     }
+    if(dayStarts.size>=4096)dayStarts.clear();
+    dayStarts.set(key,right);
     return right;
 }
 export async function ownerGoalZone(supabase,owner,requested){
