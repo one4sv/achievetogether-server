@@ -52,17 +52,31 @@ async function detail(supabase,goal) {
         stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
         events:events.data || []};
 }
-async function allowOwnTarget(supabase,kind,targetId,userId) {
+async function allowOwnTarget(supabase,kind,targetId,userId,existingGoalId=null) {
     const [table,ownerColumn]=targets[kind];
-    const {data,error}=await supabase.from(table).select("id")
+    const {data,error}=await supabase.from(table).select(kind==="habit"?"id,ongoing":"id,status,plan_date,start_time,end_time")
         .eq("id",targetId).eq(ownerColumn,userId).maybeSingle();
     if(error) throw error;
-    return data;
+    if(!data) return null;
+    const now=new Date();
+    const day=now.toLocaleDateString("en-CA",{timeZone:"Europe/Moscow"});
+    const clock=now.toLocaleTimeString("en-GB",{timeZone:"Europe/Moscow",hourCycle:"h23"});
+    const cutoff=data.end_time || data.start_time;
+    const active=kind==="habit"?data.ongoing===true:data.status==="upcoming" &&
+        (data.plan_date>day || (data.plan_date===day && (!cutoff || cutoff.slice(0,5)>clock.slice(0,5))));
+    if(active) return data;
+    if(existingGoalId){
+        const [,,linkTable,col]=targets[kind];
+        const linked=await supabase.from(linkTable).select(col).eq("goal_id",existingGoalId).eq(col,targetId).maybeSingle();
+        if(linked.error) throw linked.error;
+        if(linked.data) return data;
+    }
+    return null;
 }
 
 const validIds = ids => Array.isArray(ids) && ids.length <= 40 && ids.every(validId);
-async function validateLinks(supabase,userId,kind,ids){
-    for(const id of ids) if(!await allowOwnTarget(supabase,kind,id,userId)) return false;
+async function validateLinks(supabase,userId,kind,ids,existingGoalId=null){
+    for(const id of ids) if(!await allowOwnTarget(supabase,kind,id,userId,existingGoalId)) return false;
     return true;
 }
 
@@ -150,8 +164,8 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const {habit_ids,plan_ids,...fields}=req.body || {};
             const input=validateGoal(fields,old);
             if(!input || (habit_ids!==undefined && !validIds(habit_ids)) || (plan_ids!==undefined && !validIds(plan_ids))) return invalid(res);
-            if(habit_ids!==undefined && !await validateLinks(supabase,req.user.id,"habit",habit_ids)) return missing(res);
-            if(plan_ids!==undefined && !await validateLinks(supabase,req.user.id,"plan",plan_ids)) return missing(res);
+            if(habit_ids!==undefined && !await validateLinks(supabase,req.user.id,"habit",habit_ids,old.id)) return missing(res);
+            if(plan_ids!==undefined && !await validateLinks(supabase,req.user.id,"plan",plan_ids,old.id)) return missing(res);
             if(automaticMode(input.progress_mode ?? old.progress_mode)){
                 if(habit_ids!==undefined && !habit_ids.length) return invalid(res);
                 if(habit_ids===undefined){

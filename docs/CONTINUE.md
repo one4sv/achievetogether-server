@@ -29,4 +29,6 @@ API `/goal-workspace` — серверный контракт интегриро
 
 ## Автоматический прогресс целей
 
-Миграция `at_goal_activity_progress.sql` расширяет режимы на `days`, `streak`, `daily_timer`. Расчёт в `utils/activityGoalProgress.js` по запланированным дням и завершённым таймерам без пауз. Редактирование цели и связей атомарно через owner-only RPC `at_update_goal_and_links`. Нужны серверные тесты и проверка миграции до публикации.
+Миграция `at_goal_activity_progress.sql` расширяет режимы на `days`, `streak`, `daily_timer`, `daily_counter`. Расчёт в `utils/activityGoalProgress.js` по запланированным дням и завершённым таймерам без пауз. Редактирование цели и связей атомарно через owner-only RPC `at_update_goal_and_links`. Нужны серверные тесты и проверка миграции до публикации.
+
+Счётчик: `habit_counters.count` по дате `created_at` в Europe/Moscow, целевое значение `metric_target` на каждый запланированный день, результат — число дней с достигнутым порогом. Новые связи разрешены только с ongoing-активностями и предстоящими планами; старые связи с архивированными объектами сохраняются до явной отвязки. Миграция `at_goal_counter_and_active_links.sql` обновляет ограничения и RPC.
