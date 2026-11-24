@@ -1,7 +1,7 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalWorkspace.js";
 
-import { automaticMode, readActivityProgress, ownerGoalZone } from "../../utils/activityGoalProgress.js";
+import { automaticMode, readActivityProgress, ownerGoalZone, goalDay } from "../../utils/activityGoalProgress.js";
 
 const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
 const targets = {
@@ -30,7 +30,7 @@ async function event(supabase,goalId,userId,action,details = null) {
     });
     if (error) console.error("Goal audit event:",error.code || error.message);
 }
-async function calculate(supabase,goal,habitIds,stages,zone){
+export async function calculateGoalProgress(supabase,goal,habitIds,stages,zone){
     const progress=automaticMode(goal.progress_mode)?await readActivityProgress(supabase,goal,habitIds,zone):{progress:goalProgress(goal,stages)};
     let recorded=goal;
     if(goal.last_progress!==undefined && (Number(goal.last_progress)!==progress.progress || goal.last_progress===null ||
@@ -60,7 +60,7 @@ async function detail(supabase,goal,requestedZone) {
     ]);
     if(habits.error || plans.error) throw habits.error || plans.error;
     const zone=await ownerGoalZone(supabase,goal.owner_id,requestedZone);
-    const progress=await calculate(supabase,goal,habitIds,stages.data || [],zone);
+    const progress=await calculateGoalProgress(supabase,goal,habitIds,stages.data || [],zone);
     return {...progress,
         stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
         events:events.data || []};
@@ -72,8 +72,9 @@ async function allowOwnTarget(supabase,kind,targetId,userId,existingGoalId=null)
     if(error) throw error;
     if(!data) return null;
     const now=new Date();
-    const day=now.toLocaleDateString("en-CA",{timeZone:"Europe/Moscow"});
-    const clock=now.toLocaleTimeString("en-GB",{timeZone:"Europe/Moscow",hourCycle:"h23"});
+    const zone=await ownerGoalZone(supabase,userId);
+    const day=goalDay(now,zone);
+    const clock=now.toLocaleTimeString("en-GB",{timeZone:zone,hourCycle:"h23"});
     const cutoff=data.end_time || data.start_time;
     const active=kind==="habit"?data.ongoing===true:data.status==="upcoming" &&
         (data.plan_date>day || (data.plan_date===day && (!cutoff || cutoff.slice(0,5)>clock.slice(0,5))));
@@ -116,7 +117,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             for(let i=0;i<goals.length;i+=8){
                 results.push(...await Promise.all(goals.slice(i,i+8).map(async g=>{
                     const habit_ids=(links || []).filter(l=>String(l.goal_id)===String(g.id)).map(l=>l.habit_id);
-                    return {...await calculate(supabase,g,habit_ids,stages.filter(s=>String(s.goal_id)===String(g.id)),zone),habit_ids};
+                    return {...await calculateGoalProgress(supabase,g,habit_ids,stages.filter(s=>String(s.goal_id)===String(g.id)),zone),habit_ids};
                 })));
             }
             return res.json({success:true,goals:results});
