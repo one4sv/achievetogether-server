@@ -4,6 +4,7 @@ import { authenticateUser } from "../../middleware/token.js";
 export default function (app, supabase) {
   // Календарь всех привычек пользователя
   app.get("/calendar", authenticateUser(supabase), async (req, res) => {
+    if (!req.user?.id) return res.status(401).json({ success:false,error:"Войдите в аккаунт" });
     const { id: user_id } = req.user;
 
     try {
@@ -227,9 +228,6 @@ export default function (app, supabase) {
           }))
       ];
 
-      const { data: progressSettings, error: progressError } = await supabase.from("habits")
-        .select("user_id, metric_progress_mode").eq("id", habitId).single();
-      if (progressError) throw progressError;
       const progressUserId = req.habitAccess.progress_user_id;
 
       // Все исторические таймеры привычки
