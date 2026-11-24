@@ -1,4 +1,4 @@
-const modes = new Set(["manual", "metric", "milestones", "combined", "days", "streak", "daily_timer"]);
+const modes = new Set(["manual", "metric", "milestones", "combined", "days", "streak", "daily_timer", "daily_counter"]);
 const statuses = new Set(["active", "paused", "completed", "canceled", "archived"]);
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const validNumber = value => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1000000000;
@@ -36,6 +36,7 @@ export function validateGoal(body, old = null) {
     if ("daily_minutes" in v && (!Number.isInteger(v.daily_minutes) || v.daily_minutes < 1 || v.daily_minutes > 1440)) return null;
     const merged = { progress_mode:"manual",metric_start:0,metric_target:100,metric_current:0,
         ...old,...v };
+    if (merged.progress_mode === "daily_counter" && (!Number.isInteger(Number(merged.metric_target)) || Number(merged.metric_target) < 1 || Number(merged.metric_target) > 1000000000)) return null;
     if (["metric","combined"].includes(merged.progress_mode) && merged.metric_target === merged.metric_start) return null;
     return v;
 }
@@ -47,7 +48,7 @@ export function validateGoalStage(body, creating = true) {
     if (creating && !("title" in v)) return null;
     if ("title" in v && (typeof v.title !== "string" || !v.title.trim() || v.title.length > 160)) return null;
     if ("title" in v) v.title = v.title.trim();
-    if ("weight" in v && (!validNumber(v.weight) || v.weight <= 0 || v.weight > 10000)) return null;
+    if ("weight" in v && (!validNumber(v.weight) || v.weight < 0.001 || v.weight > 10000)) return null;
     if ("completed" in v && typeof v.completed !== "boolean") return null;
     if (creating && "completed" in v) return null;
     return v;
