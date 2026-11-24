@@ -1,4 +1,4 @@
-import { filterBlockedHabitMemberships, getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { filterBlockedHabitMemberships, requireHabitView } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 
 export default function (app, supabase) {
@@ -121,7 +121,7 @@ export default function (app, supabase) {
     }
   });
 
-  app.get("/calendar/:id", authenticateUser(supabase), requireHabitPermission(supabase, "view"), async (req, res) => {
+  app.get("/calendar/:id", authenticateUser(supabase), requireHabitView(supabase), async (req, res) => {
     const habitId = parseInt(req.params.id);
 
     if (isNaN(habitId)) {
@@ -155,11 +155,11 @@ export default function (app, supabase) {
       }
 
       // Все комментарии
-      const { data: comments, error: errorComments } = await supabase
+      const { data: comments, error: errorComments } = req.user?.id ? await supabase
         .from("completions_comments")
         .select("comment, date")
         .eq("habit_id", habitId)
-        .eq("user_id", req.user.id);
+        .eq("user_id", req.user.id) : {data:[],error:null};
 
       if (errorComments) {
         console.log(errorComments);
@@ -230,8 +230,7 @@ export default function (app, supabase) {
       const { data: progressSettings, error: progressError } = await supabase.from("habits")
         .select("user_id, metric_progress_mode").eq("id", habitId).single();
       if (progressError) throw progressError;
-      const progressUserId = progressSettings.metric_progress_mode === "shared"
-        ? progressSettings.user_id : req.user.id;
+      const progressUserId = req.habitAccess.progress_user_id;
 
       // Все исторические таймеры привычки
       const { data: timersData, error: timersError } = await supabase
@@ -272,8 +271,8 @@ export default function (app, supabase) {
       res.json({ 
         success: true, 
         calendar: mapped, 
-        timers: timersData || [],
-        counters: parsedCounters
+        timers: req.habitAccess.is_member ? (timersData || []) : (timersData || []).map(timer=>({...timer,circles:(timer.circles || []).map(circle=>({...circle,text:null}))})),
+        counters: req.habitAccess.is_member ? parsedCounters : parsedCounters.map(counter=>({...counter,progression:counter.progression.map(p=>({...p,text:""}))}))
       });
     } catch (err) {
       console.error("Ошибка запроса к Supabase:", err);
