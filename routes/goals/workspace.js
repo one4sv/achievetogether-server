@@ -3,6 +3,8 @@ import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalW
 
 import { automaticMode, readActivityProgress, ownerGoalZone, goalDay, requiredHabitMetric } from "../../utils/activityGoalProgress.js";
 
+import { advanceGoalPeriod, prepareOwnedGoal, repeating } from "../../utils/goalPeriods.js";
+
 const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
 const targets = {
     habit: ["habits","user_id","at_goal_habit_links","habit_id"],
@@ -22,7 +24,7 @@ async function owned(supabase,id,userId) {
     const {data,error} = await supabase.from("at_goals").select("*").eq("id",id)
         .eq("owner_id",userId).maybeSingle();
     if (error) throw error;
-    return data;
+    return prepareOwnedGoal(supabase,data);
 }
 async function event(supabase,goalId,userId,action,details = null) {
     const {error} = await supabase.from("at_goal_events").insert({
@@ -31,18 +33,24 @@ async function event(supabase,goalId,userId,action,details = null) {
     if (error) console.error("Goal audit event:",error.code || error.message);
 }
 export async function calculateGoalProgress(supabase,goal,habitIds,stages,zone){
+    if(repeating(goal)){
+        zone=await ownerGoalZone(supabase,goal.owner_id);
+        ({goal,stages}=await advanceGoalPeriod(supabase,goal,habitIds,stages,zone));
+    }
     const progress=automaticMode(goal.progress_mode)?await readActivityProgress(supabase,goal,habitIds,zone):{progress:goalProgress(goal,stages)};
     let recorded=goal;
     if(goal.last_progress!==undefined && (Number(goal.last_progress)!==progress.progress || goal.last_progress===null ||
         (goal.auto_complete && goal.status==="active" && progress.progress>=100) ||
         (goal.auto_completed && goal.status==="completed" && progress.progress<100))){
-        const {data,error}=await supabase.rpc("at_record_goal_progress",{p_goal_id:goal.id,p_owner:goal.owner_id,p_progress:progress.progress});
+        const args={p_goal_id:goal.id,p_owner:goal.owner_id,p_progress:progress.progress};
+        const {data,error}=repeating(goal)?await supabase.rpc("at_record_goal_period_progress",{...args,p_expected_start:goal.repeat_period_start}):await supabase.rpc("at_record_goal_progress",args);
         if(error) throw error;
         recorded=(Array.isArray(data)?data[0]:data) || goal;
     }
     return {...recorded,...progress};
 }
 async function detail(supabase,goal,requestedZone) {
+    goal=await prepareOwnedGoal(supabase,goal,requestedZone);
     const [stages,habitsLinks,plansLinks,events] = await Promise.all([
         supabase.from("at_goal_stages").select("*").eq("goal_id",goal.id)
             .order("position",{ascending:true}).order("id",{ascending:true}),
@@ -181,6 +189,18 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const goal=await owned(supabase,req.params.id,req.user.id);
             if(!goal) return missing(res);
             return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
+        }catch(error){return fail(res,error);}
+    });
+
+    app.get("/goal-workspace/:id/periods",auth,async(req,res)=>{
+        if(!req.user?.id) return unauthorized(res);
+        try{
+            const goal=await owned(supabase,req.params.id,req.user.id);
+            if(!goal)return missing(res);
+            let query=supabase.from("at_goal_periods").select("id,frequency,period_start,period_end,progress,completed,closed_at").eq("goal_id",goal.id).order("id",{ascending:false}).limit(50);
+            if(req.query?.before!==undefined){if(!validId(req.query.before))return invalid(res);query=query.lt("id",req.query.before);}
+            const {data,error}=await query;if(error)throw error;
+            return res.json({success:true,periods:data || []});
         }catch(error){return fail(res,error);}
     });
 

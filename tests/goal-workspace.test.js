@@ -35,3 +35,8 @@ test("explicit milestones set achieved percentages without normalizing by weight
     assert.equal(validateGoal({name:"Timer",progress_mode:"total_timer",metric_target:0}),null);
     assert.equal(validateGoal({name:"Timer",progress_mode:"total_timer",metric_target:600}).metric_target,600);
 });
+
+test("repeat frequency is validated",()=>{
+    for(const repeat_frequency of ["none","daily","weekly","monthly"])assert.equal(validateGoal({name:"Repeat",repeat_frequency}).repeat_frequency,repeat_frequency);
+    assert.equal(validateGoal({name:"Repeat",repeat_frequency:"yearly"}),null);
+});

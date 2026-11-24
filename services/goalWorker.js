@@ -1,4 +1,5 @@
 import { calculateGoalProgress } from "../routes/goals/workspace.js";
+import { advanceGoalPeriod } from "../utils/goalPeriods.js";
 import { goalDay, ownerGoalZone } from "../utils/activityGoalProgress.js";
 import { sendWebPush, validPushEndpoint, publicVapidKey } from "../utils/webPush.js";
 
@@ -23,6 +24,16 @@ async function refreshDirty(supabase){
             }
             await rows(supabase.from("at_goal_dirty").delete().eq("goal_id",job.goal_id).eq("queued_at",job.queued_at));
         }catch(error){console.error("[goals] recalculation:",error.message);}
+    }
+}
+
+async function rollDuePeriods(supabase){
+    const goals=await rows(supabase.from("at_goals").select("*").lte("repeat_next_at",new Date().toISOString()).in("status",["active","paused","completed"]).order("repeat_next_at").limit(100));
+    for(const goal of goals){
+        try{
+            const zone=await ownerGoalZone(supabase,goal.owner_id);
+            await advanceGoalPeriod(supabase,goal,undefined,undefined,zone);
+        }catch(error){console.error("[goals] period rollover:",error.message);}
     }
 }
 
@@ -76,7 +87,7 @@ export function startGoalWorker(supabase){
     const run=async()=>{
         if(running)return;
         running=true;
-        try{await refreshDirty(supabase);await reminders(supabase);}
+        try{await rollDuePeriods(supabase);await refreshDirty(supabase);await reminders(supabase);}
         catch(error){console.error("[goals] worker:",error.message);}
         finally{running=false;}
     };
