@@ -1,7 +1,7 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalWorkspace.js";
 
-import { automaticMode, readActivityProgress } from "../../utils/activityGoalProgress.js";
+import { automaticMode, readActivityProgress, ownerGoalZone } from "../../utils/activityGoalProgress.js";
 
 const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
 const targets = {
@@ -30,7 +30,19 @@ async function event(supabase,goalId,userId,action,details = null) {
     });
     if (error) console.error("Goal audit event:",error.code || error.message);
 }
-async function detail(supabase,goal) {
+async function calculate(supabase,goal,habitIds,stages,zone){
+    const progress=automaticMode(goal.progress_mode)?await readActivityProgress(supabase,goal,habitIds,zone):{progress:goalProgress(goal,stages)};
+    let recorded=goal;
+    if(goal.last_progress!==undefined && (Number(goal.last_progress)!==progress.progress || goal.last_progress===null ||
+        (goal.auto_complete && goal.status==="active" && progress.progress>=100) ||
+        (goal.auto_completed && goal.status==="completed" && progress.progress<100))){
+        const {data,error}=await supabase.rpc("at_record_goal_progress",{p_goal_id:goal.id,p_owner:goal.owner_id,p_progress:progress.progress});
+        if(error) throw error;
+        recorded=(Array.isArray(data)?data[0]:data) || goal;
+    }
+    return {...recorded,...progress};
+}
+async function detail(supabase,goal,requestedZone) {
     const [stages,habitsLinks,plansLinks,events] = await Promise.all([
         supabase.from("at_goal_stages").select("*").eq("goal_id",goal.id)
             .order("position",{ascending:true}).order("id",{ascending:true}),
@@ -47,8 +59,9 @@ async function detail(supabase,goal) {
         planIds.length ? supabase.from("one_off_plans").select("id,name,plan_date").in("id",planIds) : {data:[],error:null}
     ]);
     if(habits.error || plans.error) throw habits.error || plans.error;
-    const progress = automaticMode(goal.progress_mode) ? await readActivityProgress(supabase,goal,habitIds) : {progress:goalProgress(goal,stages.data || [])};
-    return {...goal,...progress,
+    const zone=await ownerGoalZone(supabase,goal.owner_id,requestedZone);
+    const progress=await calculate(supabase,goal,habitIds,stages.data || [],zone);
+    return {...progress,
         stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
         events:events.data || []};
 }
@@ -96,15 +109,17 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 if(result.error) throw result.error;
                 stages=result.data || [];
             }
-            return res.json({success:true,goals:await Promise.all(goals.map(async g=>{
-                const {data:links,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",g.id);
-                if(error) throw error;
-                const habit_ids=(links || []).map(l=>l.habit_id);
-                if(automaticMode(g.progress_mode)){
-                    return {...g,habit_ids,...await readActivityProgress(supabase,g,habit_ids)};
-                }
-                return {...g,habit_ids,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)))};
-            }))});
+            const zone=goals.length?await ownerGoalZone(supabase,req.user.id,req.query?.timezone):"UTC";
+            const {data:links,error:linksError}=goals.length?await supabase.from("at_goal_habit_links").select("goal_id,habit_id").in("goal_id",goals.map(g=>g.id)):{data:[],error:null};
+            if(linksError) throw linksError;
+            const results=[];
+            for(let i=0;i<goals.length;i+=8){
+                results.push(...await Promise.all(goals.slice(i,i+8).map(async g=>{
+                    const habit_ids=(links || []).filter(l=>String(l.goal_id)===String(g.id)).map(l=>l.habit_id);
+                    return {...await calculate(supabase,g,habit_ids,stages.filter(s=>String(s.goal_id)===String(g.id)),zone),habit_ids};
+                })));
+            }
+            return res.json({success:true,goals:results});
         }catch(error){return fail(res,error);}
     });
 
@@ -144,7 +159,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 throw error;
             }
             await event(supabase,goal.id,req.user.id,"created");
-            return res.status(201).json({success:true,goal:await detail(supabase,goal)});
+            return res.status(201).json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -153,7 +168,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
         try{
             const goal=await owned(supabase,req.params.id,req.user.id);
             if(!goal) return missing(res);
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -186,7 +201,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             await event(supabase,goal.id,req.user.id,"updated",{
                 status:goal.status,progress_mode:goal.progress_mode
             });
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -218,7 +233,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             });
             if(error) throw error;
             await event(supabase,goal.id,req.user.id,"stage_added");
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -239,7 +254,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 .eq("goal_id",goal.id).eq("id",stage.id);
             if(error) throw error;
             await event(supabase,goal.id,req.user.id,"stage_updated",{id:stage.id});
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -257,7 +272,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 .eq("goal_id",goal.id).eq("id",existing.id);
             if(error) throw error;
             await event(supabase,goal.id,req.user.id,"stage_deleted");
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -278,7 +293,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             },{onConflict:"goal_id,"+idCol});
             if(error) throw error;
             await event(supabase,goal.id,req.user.id,"link_added",{kind:body.kind,id:target.id});
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 
@@ -299,7 +314,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 .eq(idCol,req.params.linkId);
             if(error) throw error;
             await event(supabase,goal.id,req.user.id,"link_removed",{kind,id:req.params.linkId});
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return res.json({success:true,goal:await detail(supabase,goal,req.query?.timezone)});
         }catch(error){return fail(res,error);}
     });
 }

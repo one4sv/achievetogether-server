@@ -14,7 +14,7 @@ export function validGoalDate(value) {
 export function validateGoal(body, old = null) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const keys = ["name", "description", "due_date", "progress_mode", "status",
-        "manual_progress", "metric_start", "metric_target", "metric_current", "metric_unit", "metric_share", "target_days", "daily_minutes"];
+        "manual_progress", "metric_start", "metric_target", "metric_current", "metric_unit", "metric_share", "target_days", "daily_minutes", "auto_complete", "reminder_days"];
     if (!Object.keys(body).length || Object.keys(body).some(key => !keys.includes(key))) return null;
     const v = { ...body };
     if ("name" in v) {
@@ -34,6 +34,8 @@ export function validateGoal(body, old = null) {
     if ("metric_share" in v && (v.metric_share < 0 || v.metric_share > 1)) return null;
     if ("target_days" in v && (!Number.isInteger(v.target_days) || v.target_days < 1 || v.target_days > 3650)) return null;
     if ("daily_minutes" in v && (!Number.isInteger(v.daily_minutes) || v.daily_minutes < 1 || v.daily_minutes > 1440)) return null;
+    if ("auto_complete" in v && typeof v.auto_complete !== "boolean") return null;
+    if ("reminder_days" in v && v.reminder_days !== null && (!Number.isInteger(v.reminder_days) || v.reminder_days<0 || v.reminder_days>30)) return null;
     const merged = { progress_mode:"manual",metric_start:0,metric_target:100,metric_current:0,
         ...old,...v };
     if (merged.progress_mode === "daily_counter" && (!Number.isInteger(Number(merged.metric_target)) || Number(merged.metric_target) < 1 || Number(merged.metric_target) > 1000000000)) return null;
