@@ -1,3 +1,4 @@
+import { getHabitAccess } from "./habitAccess.js";
 // Civil completion dates are preserved; absolute timestamps use the goal owner timezone.
 export const automaticMode = mode => ["days","streak","daily_timer","daily_counter","total_timer"].includes(mode);
 export const requiredHabitMetric = mode => mode==="daily_timer" || mode==="total_timer" ? "timer" : mode==="daily_counter" ? "counter" : null;
@@ -127,10 +128,28 @@ async function allRows(makeQuery) {
 
 export async function readActivityProgress(supabase,goal,habitIds,zone="Europe/Moscow",asOf=new Date()) {
     if(!habitIds.length) return {progress:0,achieved_days:0};
-    const {data:habits,error}=await supabase.from("habits")
-        .select("id,start_date,end_date,periodicity,chosen_days,cycle_days_active,cycle_days_rest,habits_settings(metric_type)")
-        .eq("user_id",goal.owner_id).in("id",habitIds);
+    const {data:rawHabits,error}=await supabase.from("habits")
+        .select("id,user_id,start_date,end_date,periodicity,chosen_days,cycle_days_active,cycle_days_rest,completion_mode,metric_progress_mode,goal_scope,goal_completion_mode,habits_settings(metric_type)")
+        .in("id",habitIds);
     if(error) throw error;
+    const habits=[];
+    const sources=new Map();
+    for(const habit of rawHabits || []){
+        const owner=habit.user_id===goal.owner_id;
+        const member=owner?null:await getHabitAccess(supabase,habit.id,goal.owner_id);
+        if(!owner && !member?.is_member)continue;
+        const shared=Boolean(goal.shared_habit_id && !goal.template_goal_id && habit.goal_scope==="shared" && habit.goal_completion_mode==="shared");
+        let contributors=[goal.owner_id];
+        if(shared){
+            const result=await supabase.from("habit_members").select("user_id").eq("habit_id",habit.id).eq("status","accepted");
+            if(result.error)throw result.error;
+            for(const {user_id} of result.data || [])if(user_id!==goal.owner_id && (await getHabitAccess(supabase,habit.id,user_id))?.is_member)contributors.push(user_id);
+            contributors=[...new Set(contributors)];
+        }
+        sources.set(String(habit.id),{complete:habit.completion_mode==="shared"?[habit.user_id]:contributors,metric:habit.metric_progress_mode==="shared"?[habit.user_id]:contributors});
+        habits.push(habit);
+    }
+    if(habits.length!==new Set(habitIds.map(String)).size)return {progress:0,achieved_days:0,achieved_minutes:0};
     const required=requiredHabitMetric(goal.progress_mode);
     if(required && (habits || []).some(h=>{
         const settings=Array.isArray(h.habits_settings)?h.habits_settings[0]:h.habits_settings;
@@ -140,12 +159,20 @@ export async function readActivityProgress(supabase,goal,habitIds,zone="Europe/M
     if(!ids.length) return {progress:0,achieved_days:0};
     const start=goal.repeat_period_start || goalDay(goal.created_at,zone),today=goalDay(asOf,zone);
     const from=new Date(dayStart(start,zone)).toISOString();
-    const [completed,planned,timers,counters]=await Promise.all([
-        allRows(()=>supabase.from("habit_completions").select("id,habit_id,completed_at").eq("user_id",goal.owner_id).in("habit_id",ids).gte("completed_at",start).lte("completed_at",today)),
+    // Query only authorized storage-user/habit pairs. Group identical source sets for ordinary personal goals.
+    const group=(field)=>{
+        const groups=new Map();
+        for(const id of ids){const users=[...sources.get(String(id))[field]].sort();const k=users.join(",");if(!groups.has(k))groups.set(k,{users,ids:[]});groups.get(k).ids.push(id);}
+        return [...groups.values()];
+    };
+    const readGroups=async(field,makeQuery)=>(await Promise.all(group(field).map(g=>allRows(()=>makeQuery(g).in("user_id",g.users).in("habit_id",g.ids))))).flat();
+    const [completed,planned,timers,rawCounters]=await Promise.all([
+        readGroups("complete",()=>supabase.from("habit_completions").select("id,habit_id,completed_at").gte("completed_at",start).lte("completed_at",today)),
         allRows(()=>supabase.from("habit_planned").select("id,habit_id,planned_at").in("habit_id",ids).gte("planned_at",start).lte("planned_at",today)),
-        required==="timer"?allRows(()=>supabase.from("habit_timers").select("id,habit_id,started_at,end_at,status,pauses").eq("user_id",goal.owner_id).in("habit_id",ids).or("end_at.gte."+from+",status.in.(running,paused)")):Promise.resolve([]),
-        goal.progress_mode==="daily_counter"?allRows(()=>supabase.from("habit_counters").select("id,habit_id,created_at,count").eq("user_id",goal.owner_id).in("habit_id",ids).gte("created_at",from)):Promise.resolve([])
+        required==="timer"?readGroups("metric",()=>supabase.from("habit_timers").select("id,habit_id,started_at,end_at,status,pauses").or("end_at.gte."+from+",status.in.(running,paused)")):Promise.resolve([]),
+        goal.progress_mode==="daily_counter"?readGroups("metric",()=>supabase.from("habit_counters").select("id,habit_id,user_id,created_at,count").gte("created_at",from)):Promise.resolve([])
     ]);
+    const counters=aggregateGoalCounters(rawCounters,zone);
     const progress=activityGoalProgress(goal,habits || [],completed,planned,timers,today,counters,zone,asOf.getTime());
     return {...progress,recent_records:recentActivityRecords(goal,completed,timers,counters,zone,asOf.getTime())};
 }
@@ -159,4 +186,16 @@ export function recentActivityRecords(goal,completed,timers,counters,zone,now=Da
     else if(goal.progress_mode==="daily_counter") records=counters.filter(c=>inRange(c.created_at)).map(c=>({kind:"counter",id:String(c.id),date:c.created_at,value:Number(c.count)}));
     else records=completed.filter(c=>c.completed_at>=(goal.repeat_period_start || goalDay(goal.created_at,zone)) && c.completed_at<=goalDay(end,zone)).map(c=>({kind:"day",id:String(c.id),date:c.completed_at}));
     return records.sort((a,b)=>b.date.localeCompare(a.date)).slice(0,2);
+}
+
+export function aggregateGoalCounters(rows,zone){
+    const byActor=new Map();
+    for(const row of rows){const k=String(row.habit_id)+":"+goalDay(row.created_at,zone)+":"+String(row.user_id);const old=byActor.get(k);if(!old || Number(row.count)>Number(old.count) || (Number(row.count)===Number(old.count) && row.created_at>old.created_at))byActor.set(k,row);}
+    const byDay=new Map();
+    for(const row of byActor.values()){
+        const k=String(row.habit_id)+":"+goalDay(row.created_at,zone);const old=byDay.get(k);
+        if(!old)byDay.set(k,{...row,count:Number(row.count)});
+        else {old.count+=Number(row.count);if(row.created_at>old.created_at){old.created_at=row.created_at;old.id=row.id;}}
+    }
+    return [...byDay.values()];
 }

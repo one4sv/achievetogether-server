@@ -75,7 +75,7 @@ async function detail(supabase,goal,requestedZone) {
     const habitIds=(habitsLinks.data || []).map(x=>x.habit_id);
     const planIds=(plansLinks.data || []).map(x=>x.plan_id);
     const [habits,plans]=await Promise.all([
-        habitIds.length ? supabase.from("habits").select("id,name").in("id",habitIds) : {data:[],error:null},
+        habitIds.length ? supabase.from("habits").select("id,name,user_id").in("id",habitIds) : {data:[],error:null},
         planIds.length ? supabase.from("one_off_plans").select("id,name,plan_date").in("id",planIds) : {data:[],error:null}
     ]);
     if(habits.error || plans.error) throw habits.error || plans.error;
@@ -83,8 +83,9 @@ async function detail(supabase,goal,requestedZone) {
     const progress=await calculateGoalProgress(supabase,goal,habitIds,stages.data || [],zone);
     const latest=await supabase.from("at_goal_events").select("id,action,details,created_at").eq("goal_id",goal.id).order("id",{ascending:false}).limit(30);
     if(latest.error)throw latest.error;
+    const visibleHabits=(await Promise.all((habits.data || []).map(async h=>h.user_id===goal.owner_id || (await getHabitAccess(supabase,h.id,goal.owner_id))?.is_member ? {id:h.id,name:h.name}:null))).filter(Boolean);
     return {...progress,
-        stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
+        stages:stages.data || [],habits:visibleHabits,plans:plans.data || [],
         events:latest.data || []};
 }
 async function allowOwnTarget(supabase,kind,targetId,userId,existingGoalId=null) {
@@ -156,10 +157,11 @@ export default function goalWorkspaceRoutes(app,supabase) {
                     const result=await calculateGoalProgress(supabase,g,habit_ids,ownStages,zone);
                     const recentStages=ownStages.filter(s=>s.completed_at && (!result.repeat_period_start || goalDay(s.completed_at,zone)>=result.repeat_period_start)).sort((a,b)=>String(b.completed_at).localeCompare(String(a.completed_at))).slice(0,2);
                     const access=g.shared_habit_id?await sharedGoalAccess(supabase,g,req.user.id):null;
+                    if(g.shared_habit_id && !access)return null;
                     return {...publicGoalPermissions(result,access),habit_ids,recent_stages:recentStages};
                 })));
             }
-            return res.json({success:true,goals:results});
+            return res.json({success:true,goals:results.filter(Boolean)});
         }catch(error){return fail(res,error);}
     });
 
