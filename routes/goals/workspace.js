@@ -1,6 +1,8 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalWorkspace.js";
 
+import { isAutomaticMode, loadTrackedDays } from "../../utils/goalTracking.js";
+
 const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
 const targets = {
     habit: ["habits","user_id","at_goal_habit_links","habit_id"],
@@ -41,11 +43,12 @@ async function detail(supabase,goal) {
     const habitIds=(habitsLinks.data || []).map(x=>x.habit_id);
     const planIds=(plansLinks.data || []).map(x=>x.plan_id);
     const [habits,plans]=await Promise.all([
-        habitIds.length ? supabase.from("habits").select("id,name").in("id",habitIds) : {data:[],error:null},
-        planIds.length ? supabase.from("one_off_plans").select("id,name,plan_date").in("id",planIds) : {data:[],error:null}
+        habitIds.length ? supabase.from("habits").select("id,name").in("id",habitIds).eq("user_id",goal.owner_id) : {data:[],error:null},
+        planIds.length ? supabase.from("one_off_plans").select("id,name,plan_date").in("id",planIds).eq("owner_id",goal.owner_id) : {data:[],error:null}
     ]);
     if(habits.error || plans.error) throw habits.error || plans.error;
-    return {...goal,progress:goalProgress(goal,stages.data || []),
+    const tracked_days=await loadTrackedDays(supabase,goal);
+    return {...goal,tracked_days,progress:goalProgress(goal,stages.data || [],tracked_days),
         stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
         events:events.data || []};
 }
@@ -73,48 +76,52 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 if(result.error) throw result.error;
                 stages=result.data || [];
             }
-            return res.json({success:true,goals:goals.map(g=>({
-                ...g,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)))
-            }))});
+            const result=await Promise.all(goals.map(async g=>{
+                const tracked_days=await loadTrackedDays(supabase,g);
+                return {...g,tracked_days,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)),tracked_days)};
+            }));
+            return res.json({success:true,goals:result});
         }catch(error){return fail(res,error);}
     });
 
-    app.post("/goal-workspace",auth,async(req,res)=>{
-        if(!req.user?.id) return unauthorized(res);
+    const parseLinks = (values) => values === undefined ? null :
+        Array.isArray(values) && values.length<=100 && values.every(validId) ? [...new Set(values.map(Number))] : false;
+    const save = async (req,res,old=null) => {
         const body=req.body && typeof req.body==="object" && !Array.isArray(req.body) ? req.body : {};
-        const {stages,habit_id, ...fields}=body;
-        const input=validateGoal(fields);
-        if(!input || (habit_id!==undefined && !validId(habit_id)) ||
-           (stages!==undefined && (!Array.isArray(stages) || stages.length>40))) return invalid(res);
+        const {stages,habit_id,habit_ids,plan_ids,...fields}=body;
+        const input=validateGoal(fields,old);
+        const habits=parseLinks(habit_ids===undefined && habit_id!==undefined ? [habit_id] : habit_ids);
+        const plans=parseLinks(plan_ids);
+        if(!input || habits===false || plans===false ||
+            (stages!==undefined && (old || !Array.isArray(stages) || stages.length>40))) return invalid(res);
         const initialStages=(stages || []).map(stage=>validateGoalStage(stage));
         if(initialStages.some(stage=>!stage)) return invalid(res);
-        try {
-            if(habit_id && !await allowOwnTarget(supabase,"habit",habit_id,req.user.id)) return missing(res);
-            const {data:goal,error}=await supabase.from("at_goals").insert({
-                ...input,owner_id:req.user.id,metric_current:input.metric_current ??
-                    input.metric_start ?? 0
-            }).select("*").single();
+        const merged={...old,...input};
+        if(isAutomaticMode(merged.progress_mode) && !merged.tracking_habit_id) return invalid(res);
+        if(merged.tracking_habit_id && !await allowOwnTarget(supabase,"habit",merged.tracking_habit_id,req.user.id)) return missing(res);
+        if(merged.progress_mode==="daily_timer"){
+            const {data,error}=await supabase.from("habits_settings").select("metric_type")
+                .eq("habit_id",merged.tracking_habit_id).maybeSingle();
             if(error) throw error;
-            try {
-                if(initialStages.length){
-                    const created=await supabase.from("at_goal_stages").insert(initialStages.map((s,i)=>({
-                        goal_id:goal.id,title:s.title,weight:s.weight ?? 1,position:i
-                    })));
-                    if(created.error) throw created.error;
-                }
-                if(habit_id){
-                    const linked=await supabase.from("at_goal_habit_links").insert({
-                        goal_id:goal.id,habit_id
-                    });
-                    if(linked.error) throw linked.error;
-                }
-            }catch(error){
-                await supabase.from("at_goals").delete().eq("id",goal.id).eq("owner_id",req.user.id);
-                throw error;
-            }
-            await event(supabase,goal.id,req.user.id,"created");
-            return res.status(201).json({success:true,goal:await detail(supabase,goal)});
-        }catch(error){return fail(res,error);}
+            if(data?.metric_type!=="timer") return invalid(res);
+        }
+        for(const [kind,ids] of [["habit",habits],["plan",plans]]){
+            if(ids===null) continue;
+            for(const id of ids) if(!await allowOwnTarget(supabase,kind,id,req.user.id)) return missing(res);
+        }
+        if(!old) input.metric_current=input.metric_current ?? input.metric_start ?? 0;
+        const {data:goal,error}=await supabase.rpc("at_goal_save",{
+            p_owner:req.user.id,p_id:old?.id ?? null,p_fields:input,
+            p_habits:habits,p_plans:plans,p_stages:old?null:initialStages
+        });
+        if(error) throw error;
+        await event(supabase,goal.id,req.user.id,old?"updated":"created");
+        return res.status(old?200:201).json({success:true,goal:await detail(supabase,goal)});
+    };
+
+    app.post("/goal-workspace",auth,async(req,res)=>{
+        if(!req.user?.id) return unauthorized(res);
+        try {return await save(req,res);}catch(error){return fail(res,error);}
     });
 
     app.get("/goal-workspace/:id",auth,async(req,res)=>{
@@ -131,16 +138,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
         try{
             const old=await owned(supabase,req.params.id,req.user.id);
             if(!old) return missing(res);
-            const input=validateGoal(req.body,old);
-            if(!input) return invalid(res);
-            const {data:goal,error}=await supabase.from("at_goals").update({
-                ...input,updated_at:new Date().toISOString()
-            }).eq("id",old.id).eq("owner_id",req.user.id).select("*").single();
-            if(error) throw error;
-            await event(supabase,goal.id,req.user.id,"updated",{
-                status:goal.status,progress_mode:goal.progress_mode
-            });
-            return res.json({success:true,goal:await detail(supabase,goal)});
+            return await save(req,res,old);
         }catch(error){return fail(res,error);}
     });
 
@@ -243,6 +241,8 @@ export default function goalWorkspaceRoutes(app,supabase) {
         try{
             const goal=await owned(supabase,req.params.id,req.user.id);
             if(!goal) return missing(res);
+            if(kind==="habit" && isAutomaticMode(goal.progress_mode) &&
+                String(goal.tracking_habit_id)===String(req.params.linkId)) return invalid(res);
             const [,,table,idCol]=targets[kind];
             const {error}=await supabase.from(table).delete().eq("goal_id",goal.id)
                 .eq(idCol,req.params.linkId);
