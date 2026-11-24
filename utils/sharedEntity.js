@@ -30,6 +30,7 @@ export async function sharedEntityPreview(supabase,kind,id,viewerId) {
         const access = await getHabitAccess(supabase,id,viewerId);
         if (!access?.can_view) return null;
         return {kind,id,name:access.habit.name,periodicity:access.habit.periodicity || "",
+            avatar_url:access.habit.avatar_key ? "/api/habits/"+access.habit.id+"/avatar/"+access.habit.avatar_key : null,
             tag:access.habit.tag || null,start_time:access.habit.start_time || null,
             end_time:access.habit.end_time || null,url:"/habit/"+id};
     }
@@ -82,3 +83,4 @@ export async function sharedEntityPreview(supabase,kind,id,viewerId) {
         start_time:plan.start_time || null,end_time:plan.end_time || null,
         tag:plan.tag || null,url:"/plan/"+id};
 }
+

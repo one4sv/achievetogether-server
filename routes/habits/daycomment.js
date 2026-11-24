@@ -1,5 +1,6 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { requireHabitPermission } from "../../utils/habitAccess.js";
+import { canCompleteHabitDay } from "../../utils/habitCompletionDate.js";
 import { isCalendarDate } from "../../utils/validation.js";
 import { broadcastHabitCommentUpdated } from "../../realtime/ws.js";
 
@@ -9,7 +10,7 @@ export default function (app, supabase) {
         if (!isCalendarDate(date)) return res.status(400).json({ success: false, error: "Некорректная дата" });
         try {
             const { data: comments, error } = await supabase.from("completions_comments")
-                .select("id, user_id, comment, date, created_at").eq("habit_id", req.params.id)
+                .select("id, user_id, comment, date, created_at, photo_ids").eq("habit_id", req.params.id)
                 .eq("date", date).order("created_at", { ascending: true });
             if (error) throw error;
             // A completion belongs to the progress owner in shared mode,
@@ -64,10 +65,11 @@ export default function (app, supabase) {
             const { data: users, error: usersError } = ids.length ? await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", ids) : { data: [], error: null };
             if (usersError) throw usersError;
+            const photosVisible=(req.habitAccess.is_owner || req.habitAccess.is_member) && canCompleteHabitDay(req.habitAccess,date);
             res.json({
                 success: true,
-                comments: (comments || []).filter(item => item.comment?.trim()).map(item => ({
-                    ...item, user: users.find(user => user.id === item.user_id) || null
+                comments: (comments || []).filter(item => item.comment?.trim() || (photosVisible && item.photo_ids?.length)).map(item => ({
+                    ...item, photo_ids:photosVisible ? item.photo_ids : [], user: users.find(user => user.id === item.user_id) || null
                 })),
                 completions: completed.map(item => ({
                     ...item,

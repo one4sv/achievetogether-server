@@ -29,6 +29,7 @@ import uploadavatarRoutes from "./users/uploadavatar.js";
 import uploadbgRoutes from "./settings/uploadbg.js";
 import markdoneRoutes from "./habits/markdone.js";
 import calendarRoutes from "./habits/calendar.js";
+import activityImages from "./habits/activityImages.js";
 import daycommentRoutes from "./habits/daycomment.js";
 import pingRoutes from "./system/ping.js";
 import reactionsRoutes from "./chat/reaction.js";
@@ -102,6 +103,7 @@ export default function registerAllRoutes(app, supabase) {
     markdoneRoutes(app, supabase);
     calendarRoutes(app, supabase);
     daycommentRoutes(app, supabase);
+    activityImages(app, supabase);
     pingRoutes(app, supabase);
     reactionsRoutes(app, supabase);
     askauthRoutes(app, supabase);
