@@ -1,4 +1,4 @@
-const modes = new Set(["manual", "metric", "milestones", "combined"]);
+const modes = new Set(["manual", "metric", "milestones", "combined", "days", "streak", "daily_timer"]);
 const statuses = new Set(["active", "paused", "completed", "canceled", "archived"]);
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const validNumber = value => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1000000000;
@@ -14,7 +14,7 @@ export function validGoalDate(value) {
 export function validateGoal(body, old = null) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const keys = ["name", "description", "due_date", "progress_mode", "status",
-        "manual_progress", "metric_start", "metric_target", "metric_current", "metric_unit", "metric_share"];
+        "manual_progress", "metric_start", "metric_target", "metric_current", "metric_unit", "metric_share", "target_days", "daily_minutes"];
     if (!Object.keys(body).length || Object.keys(body).some(key => !keys.includes(key))) return null;
     const v = { ...body };
     if ("name" in v) {
@@ -32,6 +32,8 @@ export function validateGoal(body, old = null) {
     }
     if ("manual_progress" in v && (v.manual_progress < 0 || v.manual_progress > 100)) return null;
     if ("metric_share" in v && (v.metric_share < 0 || v.metric_share > 1)) return null;
+    if ("target_days" in v && (!Number.isInteger(v.target_days) || v.target_days < 1 || v.target_days > 3650)) return null;
+    if ("daily_minutes" in v && (!Number.isInteger(v.daily_minutes) || v.daily_minutes < 1 || v.daily_minutes > 1440)) return null;
     const merged = { progress_mode:"manual",metric_start:0,metric_target:100,metric_current:0,
         ...old,...v };
     if (["metric","combined"].includes(merged.progress_mode) && merged.metric_target === merged.metric_start) return null;

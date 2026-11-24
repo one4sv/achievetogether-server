@@ -1,6 +1,8 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalWorkspace.js";
 
+import { automaticMode, readActivityProgress } from "../../utils/activityGoalProgress.js";
+
 const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
 const targets = {
     habit: ["habits","user_id","at_goal_habit_links","habit_id"],
@@ -45,7 +47,8 @@ async function detail(supabase,goal) {
         planIds.length ? supabase.from("one_off_plans").select("id,name,plan_date").in("id",planIds) : {data:[],error:null}
     ]);
     if(habits.error || plans.error) throw habits.error || plans.error;
-    return {...goal,progress:goalProgress(goal,stages.data || []),
+    const progress = automaticMode(goal.progress_mode) ? await readActivityProgress(supabase,goal,habitIds) : {progress:goalProgress(goal,stages.data || [])};
+    return {...goal,...progress,
         stages:stages.data || [],habits:habits.data || [],plans:plans.data || [],
         events:events.data || []};
 }
@@ -55,6 +58,12 @@ async function allowOwnTarget(supabase,kind,targetId,userId) {
         .eq("id",targetId).eq(ownerColumn,userId).maybeSingle();
     if(error) throw error;
     return data;
+}
+
+const validIds = ids => Array.isArray(ids) && ids.length <= 40 && ids.every(validId);
+async function validateLinks(supabase,userId,kind,ids){
+    for(const id of ids) if(!await allowOwnTarget(supabase,kind,id,userId)) return false;
+    return true;
 }
 
 export default function goalWorkspaceRoutes(app,supabase) {
@@ -73,8 +82,13 @@ export default function goalWorkspaceRoutes(app,supabase) {
                 if(result.error) throw result.error;
                 stages=result.data || [];
             }
-            return res.json({success:true,goals:goals.map(g=>({
-                ...g,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)))
+            return res.json({success:true,goals:await Promise.all(goals.map(async g=>{
+                if(automaticMode(g.progress_mode)){
+                    const {data:links,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",g.id);
+                    if(error) throw error;
+                    return {...g,...await readActivityProgress(supabase,g,(links || []).map(l=>l.habit_id))};
+                }
+                return {...g,progress:goalProgress(g,stages.filter(s=>String(s.goal_id)===String(g.id)))};
             }))});
         }catch(error){return fail(res,error);}
     });
@@ -82,14 +96,16 @@ export default function goalWorkspaceRoutes(app,supabase) {
     app.post("/goal-workspace",auth,async(req,res)=>{
         if(!req.user?.id) return unauthorized(res);
         const body=req.body && typeof req.body==="object" && !Array.isArray(req.body) ? req.body : {};
-        const {stages,habit_id, ...fields}=body;
+        const {stages,habit_id,habit_ids,plan_ids, ...fields}=body;
+        const hIds=habit_ids ?? (habit_id===undefined?[]:[habit_id]);
+        const pIds=plan_ids ?? [];
         const input=validateGoal(fields);
-        if(!input || (habit_id!==undefined && !validId(habit_id)) ||
+        if(!input || !validIds(hIds) || !validIds(pIds) || (automaticMode(input.progress_mode) && !hIds.length) ||
            (stages!==undefined && (!Array.isArray(stages) || stages.length>40))) return invalid(res);
         const initialStages=(stages || []).map(stage=>validateGoalStage(stage));
         if(initialStages.some(stage=>!stage)) return invalid(res);
         try {
-            if(habit_id && !await allowOwnTarget(supabase,"habit",habit_id,req.user.id)) return missing(res);
+            if(!await validateLinks(supabase,req.user.id,"habit",hIds) || !await validateLinks(supabase,req.user.id,"plan",pIds)) return missing(res);
             const {data:goal,error}=await supabase.from("at_goals").insert({
                 ...input,owner_id:req.user.id,metric_current:input.metric_current ??
                     input.metric_start ?? 0
@@ -102,10 +118,10 @@ export default function goalWorkspaceRoutes(app,supabase) {
                     })));
                     if(created.error) throw created.error;
                 }
-                if(habit_id){
-                    const linked=await supabase.from("at_goal_habit_links").insert({
-                        goal_id:goal.id,habit_id
-                    });
+                for(const [kind,ids] of [["habit",hIds],["plan",pIds]]){
+                    if(!ids.length) continue;
+                    const [,,table,col]=targets[kind];
+                    const linked=await supabase.from(table).insert([...new Set(ids.map(Number))].map(id=>({goal_id:goal.id,[col]:id})));
                     if(linked.error) throw linked.error;
                 }
             }catch(error){
@@ -131,11 +147,24 @@ export default function goalWorkspaceRoutes(app,supabase) {
         try{
             const old=await owned(supabase,req.params.id,req.user.id);
             if(!old) return missing(res);
-            const input=validateGoal(req.body,old);
-            if(!input) return invalid(res);
-            const {data:goal,error}=await supabase.from("at_goals").update({
-                ...input,updated_at:new Date().toISOString()
-            }).eq("id",old.id).eq("owner_id",req.user.id).select("*").single();
+            const {habit_ids,plan_ids,...fields}=req.body || {};
+            const input=validateGoal(fields,old);
+            if(!input || (habit_ids!==undefined && !validIds(habit_ids)) || (plan_ids!==undefined && !validIds(plan_ids))) return invalid(res);
+            if(habit_ids!==undefined && !await validateLinks(supabase,req.user.id,"habit",habit_ids)) return missing(res);
+            if(plan_ids!==undefined && !await validateLinks(supabase,req.user.id,"plan",plan_ids)) return missing(res);
+            if(automaticMode(input.progress_mode ?? old.progress_mode)){
+                if(habit_ids!==undefined && !habit_ids.length) return invalid(res);
+                if(habit_ids===undefined){
+                    const {data:links,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",old.id);
+                    if(error) throw error;
+                    if(!links?.length) return invalid(res);
+                }
+            }
+            const {data:goal,error}=await supabase.rpc("at_update_goal_and_links",{
+                p_goal_id:old.id,p_owner:req.user.id,p_fields:input,
+                p_habit_ids:habit_ids===undefined?null:[...new Set(habit_ids.map(Number))],
+                p_plan_ids:plan_ids===undefined?null:[...new Set(plan_ids.map(Number))]
+            });
             if(error) throw error;
             await event(supabase,goal.id,req.user.id,"updated",{
                 status:goal.status,progress_mode:goal.progress_mode
@@ -244,6 +273,11 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const goal=await owned(supabase,req.params.id,req.user.id);
             if(!goal) return missing(res);
             const [,,table,idCol]=targets[kind];
+            if(kind==="habit" && automaticMode(goal.progress_mode)){
+                const {data:links,error}=await supabase.from(table).select("habit_id").eq("goal_id",goal.id);
+                if(error) throw error;
+                if((links || []).filter(l=>String(l.habit_id)!==String(req.params.linkId)).length===0) return invalid(res);
+            }
             const {error}=await supabase.from(table).delete().eq("goal_id",goal.id)
                 .eq(idCol,req.params.linkId);
             if(error) throw error;
