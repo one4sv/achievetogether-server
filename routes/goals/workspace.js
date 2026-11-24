@@ -194,6 +194,49 @@ export default function goalWorkspaceRoutes(app,supabase) {
         }catch(error){return fail(res,error);}
     });
 
+    app.get("/goal-workspace/activity/:habitId/day/:date",auth,async(req,res)=>{
+        if(!req.user?.id)return unauthorized(res);
+        const {habitId,date}=req.params;
+        if(!validId(habitId) || !validGoalDate(date))return invalid(res);
+        try{
+            const habitAccess=await getHabitAccess(supabase,habitId,req.user.id);
+            if(!habitAccess?.is_member)return missing(res);
+            const zone=await ownerGoalZone(supabase,req.user.id,req.query?.timezone);
+            const today=goalDay(new Date(),zone);
+            if(date>today)return res.json({success:true,goals:[]});
+            const next=new Date(Date.parse(date+"T00:00:00Z")+86400000).toISOString().slice(0,10);
+            const from=new Date(dayStart(date,zone)).toISOString(),to=new Date(dayStart(next,zone)).toISOString();
+            const {data:links,error}=await supabase.from("at_goal_habit_links").select("goal_id").eq("habit_id",habitId);
+            if(error)throw error;
+            if(!links?.length)return res.json({success:true,goals:[]});
+            const {data:raw,error:goalError}=await supabase.from("at_goals").select("*").in("id",links.map(l=>l.goal_id));
+            if(goalError)throw goalError;
+            const goals=[];
+            for(const candidate of raw || []){
+                if(habitAccess.habit.goal_scope==="shared" ? String(candidate.shared_habit_id)!==String(habitId) : Boolean(candidate.shared_habit_id))continue;
+                const access=await sharedGoalAccess(supabase,candidate,req.user.id);
+                if(!access)continue;
+                const goal=access.goal;
+                if(goalDay(goal.created_at,zone)>date || (goal.due_date && goal.due_date<date))continue;
+                let percent=null,kind="change";
+                if(automaticMode(goal.progress_mode)){
+                    const {data:goalLinks,error}=await supabase.from("at_goal_habit_links").select("habit_id").eq("goal_id",goal.id);
+                    if(error)throw error;
+                    const result=await readActivityProgress(supabase,{...goal,repeat_period_start:date},(goalLinks || []).map(l=>l.habit_id),zone,new Date(Math.min(Date.now(),Date.parse(to)-1)));
+                    percent=goal.progress_mode==="total_timer"?result.progress:result.today_progress ?? null;
+                    kind="daily";
+                }else{
+                    const {data:events,error}=await supabase.from("at_goal_events").select("details,created_at").eq("goal_id",goal.id).eq("action","progress_changed").gte("created_at",from).lt("created_at",to).order("id").limit(1000);
+                    if(error)throw error;
+                    const valid=(events || []).filter(e=>e.details?.from!=null && Number.isFinite(Number(e.details.from)) && Number.isFinite(Number(e.details.to)));
+                    if(valid.length)percent=Math.round(valid.reduce((sum,e)=>sum+Number(e.details.to)-Number(e.details.from),0)*100)/100;
+                }
+                goals.push({id:goal.id,name:goal.name,percent,kind});
+            }
+            return res.json({success:true,goals});
+        }catch(error){return fail(res,error);}
+    });
+
     app.get("/goal-workspace/activity/:habitId/records",auth,async(req,res)=>{
         if(!req.user?.id)return unauthorized(res);
         if(!validId(req.params.habitId))return invalid(res);

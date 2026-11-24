@@ -129,8 +129,12 @@ export default function (app, supabase) {
                 chatMembers = data || [];
             }
             const { data: completions, error: completionsError } = await supabase.from("habit_completions")
-                .select("habit_id, user_id").in("habit_id", ids).eq("completed_at", date);
+                .select("habit_id, user_id, actor_user_id").in("habit_id", ids).eq("completed_at", date);
             if (completionsError) throw completionsError;
+            const actorIds = [...new Set((completions || []).map(c => c.actor_user_id || c.user_id).filter(Boolean))];
+            const actors = actorIds.length ? await supabase.from("users").select("id,nick,username,avatar_url").in("id", actorIds) : {data:[],error:null};
+            if (actors.error) throw actors.error;
+            const actorMap = new Map((actors.data || []).map(a => [a.id,a]));
             const progress = {};
             for (const habit of habits) {
                 const participants = new Set([habit.user_id]);
@@ -142,13 +146,15 @@ export default function (app, supabase) {
                         if (member.chat_id === habit.chat_id && !member.is_blocked) participants.add(member.user_id);
                     }
                 }
+                for (const member of chatMembers) if (member.chat_id === habit.chat_id && member.is_blocked && member.user_id !== habit.user_id) participants.delete(member.user_id);
                 const doneUsers = new Set((completions || []).filter(item => item.habit_id === habit.id)
                     .map(item => item.user_id));
                 const total = participants.size;
                 const completed = habit.completion_mode === "shared"
                     ? (doneUsers.has(habit.user_id) ? total : 0)
                     : [...participants].filter(id => doneUsers.has(id)).length;
-                progress[habit.id] = { completed, total };
+                const completedActors = [...new Set((completions || []).filter(c => c.habit_id === habit.id && participants.has(c.user_id) && (habit.completion_mode !== "shared" || c.user_id === habit.user_id)).map(c => c.actor_user_id || c.user_id).filter(id => participants.has(id)))];
+                progress[habit.id] = { completed, total, actors: completedActors.slice(0,3).map(id => actorMap.get(id)).filter(Boolean), actor_count: completedActors.length };
             }
             return res.json({ success: true, date, progress });
         } catch (error) {

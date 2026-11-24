@@ -29,13 +29,14 @@ export default function (app, supabase) {
             if (membershipsError) throw membershipsError;
             const userIds = [...new Set([habit.user_id, ...(members || []).filter(m => m.status === "accepted").map(m => m.user_id)])];
             const { data: completions, error: completionError } = await supabase.from("habit_completions")
-                .select("id, user_id, completed_at, created_at").eq("habit_id", habit.id)
+                .select("id, user_id, actor_user_id, completed_at, created_at").eq("habit_id", habit.id)
                 .in("user_id", userIds).order("created_at", { ascending: false }).limit(150);
             if (completionError) throw completionError;
             const { data: auditEvents, error: auditError } = await supabase.from("habit_activity_events")
                 .select("id, user_id, type, details, created_at").eq("habit_id", habit.id)
                 .order("created_at", { ascending: false }).limit(150);
             if (auditError) throw auditError;
+            for (const item of completions || []) if (item.actor_user_id && !userIds.includes(item.actor_user_id)) userIds.push(item.actor_user_id);
             for (const item of auditEvents || []) if (item.user_id && !userIds.includes(item.user_id)) userIds.push(item.user_id);
             const { data: users, error: usersError } = await supabase.from("users")
                 .select("id, nick, username, avatar_url").in("id", userIds);
@@ -43,8 +44,8 @@ export default function (app, supabase) {
             const byId = new Map((users || []).map(user => [user.id, user]));
             const events = [
                 ...(completions || []).map(item => ({
-                    id: `completion-${item.id}`, type: "completion", user_id: item.user_id,
-                    user: byId.get(item.user_id) || null, date: item.completed_at,
+                    id: `completion-${item.id}`, type: "completion", user_id: item.actor_user_id || item.user_id,
+                    user: byId.get(item.actor_user_id || item.user_id) || null, date: item.completed_at,
                     created_at: item.created_at
                 })),
                 ...(auditEvents || []).map(item => ({
