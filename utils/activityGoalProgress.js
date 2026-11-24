@@ -146,5 +146,17 @@ export async function readActivityProgress(supabase,goal,habitIds,zone="Europe/M
         required==="timer"?allRows(()=>supabase.from("habit_timers").select("id,habit_id,started_at,end_at,status,pauses").eq("user_id",goal.owner_id).in("habit_id",ids).or("end_at.gte."+from+",status.in.(running,paused)")):Promise.resolve([]),
         goal.progress_mode==="daily_counter"?allRows(()=>supabase.from("habit_counters").select("id,habit_id,created_at,count").eq("user_id",goal.owner_id).in("habit_id",ids).gte("created_at",from)):Promise.resolve([])
     ]);
-    return activityGoalProgress(goal,habits || [],completed,planned,timers,today,counters,zone,asOf.getTime());
+    const progress=activityGoalProgress(goal,habits || [],completed,planned,timers,today,counters,zone,asOf.getTime());
+    return {...progress,recent_records:recentActivityRecords(goal,completed,timers,counters,zone,asOf.getTime())};
+}
+
+export function recentActivityRecords(goal,completed,timers,counters,zone,now=Date.now()) {
+    const begin=dayStart(goal.repeat_period_start || goalDay(goal.created_at,zone),zone);
+    const end=goal.due_date?Math.min(now,dayStart(nextDay(goal.due_date),zone)):now;
+    const inRange=timestamp=>timestamp && Date.parse(timestamp)>=begin && Date.parse(timestamp)<=end;
+    let records;
+    if(requiredHabitMetric(goal.progress_mode)==="timer") records=timers.filter(t=>t.status==="ended" && inRange(t.end_at)).map(t=>({kind:"timer",id:String(t.id),date:t.end_at,seconds:Math.floor(timerSecondsInRange(t,begin,end,now))}));
+    else if(goal.progress_mode==="daily_counter") records=counters.filter(c=>inRange(c.created_at)).map(c=>({kind:"counter",id:String(c.id),date:c.created_at,value:Number(c.count)}));
+    else records=completed.filter(c=>c.completed_at>=(goal.repeat_period_start || goalDay(goal.created_at,zone)) && c.completed_at<=goalDay(end,zone)).map(c=>({kind:"day",id:String(c.id),date:c.completed_at}));
+    return records.sort((a,b)=>b.date.localeCompare(a.date)).slice(0,2);
 }

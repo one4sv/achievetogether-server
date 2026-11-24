@@ -1,7 +1,7 @@
 import { authenticateUser } from "../../middleware/token.js";
-import { validateGoal, validateGoalStage, goalProgress } from "../../utils/goalWorkspace.js";
+import { validateGoal, validateGoalStage, goalProgress, validGoalDate } from "../../utils/goalWorkspace.js";
 
-import { automaticMode, readActivityProgress, ownerGoalZone, goalDay, requiredHabitMetric } from "../../utils/activityGoalProgress.js";
+import { automaticMode, readActivityProgress, ownerGoalZone, goalDay, dayStart, requiredHabitMetric } from "../../utils/activityGoalProgress.js";
 
 import { advanceGoalPeriod, prepareOwnedGoal, repeating } from "../../utils/goalPeriods.js";
 
@@ -123,7 +123,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const goals=data || [];
             let stages=[];
             if(goals.length){
-                const result=await supabase.from("at_goal_stages").select("id,goal_id,position,weight,completion_percent,completed_at")
+                const result=await supabase.from("at_goal_stages").select("id,goal_id,title,position,weight,completion_percent,completed_at")
                     .in("goal_id",goals.map(g=>g.id));
                 if(result.error) throw result.error;
                 stages=result.data || [];
@@ -135,10 +135,59 @@ export default function goalWorkspaceRoutes(app,supabase) {
             for(let i=0;i<goals.length;i+=8){
                 results.push(...await Promise.all(goals.slice(i,i+8).map(async g=>{
                     const habit_ids=(links || []).filter(l=>String(l.goal_id)===String(g.id)).map(l=>l.habit_id);
-                    return {...await calculateGoalProgress(supabase,g,habit_ids,stages.filter(s=>String(s.goal_id)===String(g.id)),zone),habit_ids};
+                    const ownStages=stages.filter(s=>String(s.goal_id)===String(g.id));
+                    const result=await calculateGoalProgress(supabase,g,habit_ids,ownStages,zone);
+                    const recentStages=ownStages.filter(s=>s.completed_at && (!result.repeat_period_start || goalDay(s.completed_at,zone)>=result.repeat_period_start)).sort((a,b)=>String(b.completed_at).localeCompare(String(a.completed_at))).slice(0,2);
+                    return {...result,habit_ids,recent_stages:recentStages};
                 })));
             }
             return res.json({success:true,goals:results});
+        }catch(error){return fail(res,error);}
+    });
+
+    app.get("/goal-workspace/day/:date",auth,async(req,res)=>{
+        if(!req.user?.id)return unauthorized(res);
+        const date=req.params.date;
+        if(!date || !validGoalDate(date))return invalid(res);
+        try{
+            const zone=await ownerGoalZone(supabase,req.user.id,req.query?.timezone);
+            const next=new Date(Date.parse(date+"T00:00:00Z")+86400000).toISOString().slice(0,10);
+            const from=new Date(dayStart(date,zone)).toISOString(),to=new Date(dayStart(next,zone)).toISOString();
+            const {data:goals,error}=await supabase.from("at_goals").select("id,completed_at").eq("owner_id",req.user.id);
+            if(error)throw error;
+            const ids=(goals || []).map(g=>g.id);
+            const done=new Set((goals || []).filter(g=>g.completed_at && g.completed_at>=from && g.completed_at<to).map(g=>String(g.id)));
+            if(ids.length){
+                for(let offset=0;;offset+=500){
+                    const {data,error}=await supabase.from("at_goal_events").select("goal_id,action,details,created_at").in("goal_id",ids).in("action",["progress_changed","updated","auto_status"]).gte("created_at",from).lt("created_at",to).order("id").range(offset,offset+499);
+                    if(error)throw error;
+                    for(const e of data || [])if((e.action==="progress_changed" && Number(e.details?.to)>=100 && (e.details?.from==null || Number(e.details.from)<100)) || (["updated","auto_status"].includes(e.action) && e.details?.status==="completed"))done.add(String(e.goal_id));
+                    if(!data || data.length<500)break;
+                }
+            }
+            return res.json({success:true,completed_ids:[...done]});
+        }catch(error){return fail(res,error);}
+    });
+
+    app.get("/goal-workspace/activity/:habitId/records",auth,async(req,res)=>{
+        if(!req.user?.id)return unauthorized(res);
+        if(!validId(req.params.habitId))return invalid(res);
+        try{
+            const {data:links,error}=await supabase.from("at_goal_habit_links").select("goal_id").eq("habit_id",req.params.habitId);
+            if(error)throw error;
+            if(!links?.length)return res.json({success:true,records:{}});
+            const {data:goals,error:goalError}=await supabase.from("at_goals").select("id,progress_mode,repeat_period_start").eq("owner_id",req.user.id).in("id",links.map(l=>l.goal_id));
+            if(goalError)throw goalError;
+            const records={};
+            const zone=await ownerGoalZone(supabase,req.user.id,req.query?.timezone);
+            await Promise.all((goals || []).filter(g=>["manual","metric","combined"].includes(g.progress_mode)).map(async g=>{
+                let query=supabase.from("at_goal_events").select("id,action,details,created_at").eq("goal_id",g.id).eq("action","progress_changed");
+                if(g.repeat_period_start)query=query.gte("created_at",new Date(dayStart(g.repeat_period_start,zone)).toISOString());
+                const {data,error}=await query.order("id",{ascending:false}).limit(2);
+                if(error)throw error;
+                records[g.id]=(data || []).map(e=>({kind:"progress",id:String(e.id),date:e.created_at,value:e.details?.to}));
+            }));
+            return res.json({success:true,records});
         }catch(error){return fail(res,error);}
     });
 
