@@ -61,12 +61,14 @@ import feedbackRoutes from "./system/feedback.js";
 import privateAssetRoutes from "./system/private-assets.js";
 import postAssetRoutes from "./system/post-assets.js";
 import planRoutes from "./plans/plans.js";
+import goalWorkspaceRoutes from "./goals/workspace.js";
 import planReminderRoutes from "./plans/reminders.js";
 
 export default function registerAllRoutes(app, supabase) {
     privateAssetRoutes(app, supabase);
     postAssetRoutes(app, supabase);
     planRoutes(app, supabase);
+    goalWorkspaceRoutes(app, supabase);
     planReminderRoutes(app, supabase);
 
     registerRoutes(app, supabase);
