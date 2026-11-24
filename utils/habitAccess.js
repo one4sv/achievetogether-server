@@ -57,6 +57,21 @@ export async function getHabitAccess(supabase, habitId, userId, share = null) {
     };
 }
 
+// Read-only public/share access follows the same ACL as GET /habits/:id.
+export function requireHabitView(supabase) {
+    return async (req,res,next) => {
+        try {
+            const access = await getHabitAccess(supabase,req.params.id,req.user?.id || null,req.query?.share);
+            if (!access?.can_view) return res.status(403).json({ success:false,error:"Нет доступа к активности" });
+            req.habitAccess=access;
+            next();
+        } catch (error) {
+            console.error("Ошибка проверки доступа к активности:",error);
+            res.status(500).json({success:false,error:"Не удалось проверить права"});
+        }
+    };
+}
+
 export function requireHabitPermission(supabase, action, getId = req => req.body?.habit_id ?? req.params.id ?? req.params.habit_id) {
     return async (req, res, next) => {
         try {

@@ -1,4 +1,4 @@
-import { getHabitAccess, requireHabitPermission } from "../../utils/habitAccess.js";
+import { requireHabitView } from "../../utils/habitAccess.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { withRetry } from "../../utils/withRetry.js";
 
@@ -6,17 +6,9 @@ export default function (app, supabase) {
     app.get(
         "/habits/:id/stats",
         authenticateUser(supabase),
-        requireHabitPermission(supabase, "view"),
+        requireHabitView(supabase),
         async (req, res) => {
-            const currentUserId = req.user?.id;
             const { id: habitId } = req.params;
-
-            if (!currentUserId) {
-                return res.status(401).json({
-                    success: false,
-                    error: "Не авторизован"
-                });
-            }
 
             try {
                 // =========================
