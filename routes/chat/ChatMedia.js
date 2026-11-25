@@ -224,6 +224,28 @@ export default function (app, supabase) {
         try {
             const members = await read(supabase.from("chat_members").select("is_blocked").eq("chat_id", chatId).eq("user_id", userId).limit(1));
             if (!members.length || members[0].is_blocked) return res.sendStatus(403);
+            // Exact totals use the same visibility, forwarding and deduplication rules
+            // as the library pages. Only request them when opening the saved library.
+            if (req.query.summary === "1") {
+                const counts = { media: 0, link: 0, file: 0 };
+                let before = null;
+                for (;;) {
+                    let query = visible(chatId, userId).order("id", { ascending: false }).limit(100);
+                    if (before !== null) query = query.lt("id", before);
+                    const rows = await read(query);
+                    if (!rows.length) break;
+                    for (const { row, sources } of await expandRows(rows)) {
+                        for (const item of libraryItems(row, sources)) {
+                            if (item.category === "photo" || item.category === "video") counts.media++;
+                            else if (item.category === "link") counts.link++;
+                            else if (item.category === "file") counts.file++;
+                        }
+                    }
+                    if (rows.length < 100) break;
+                    before = rows[rows.length - 1].id;
+                }
+                return res.json({ success: true, counts });
+            }
             const category = req.query.category;
             if (category) {
                 if (!["media","link","file"].includes(category)) return res.sendStatus(400);
