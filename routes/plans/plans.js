@@ -100,7 +100,12 @@ async function details(supabase,entry,userId) {
     if (error) throw error;
     const statuses = new Map(memberships.map(m => [m.user_id,m.status]));
     const completed = new Set((doneResult.data || []).map(c => c.user_id));
+    const [canComplete, canComment] = await Promise.all([
+        linkedGroupPermission(supabase, plan.chat_id, userId, "plan_complete"),
+        linkedGroupPermission(supabase, plan.chat_id, userId, "plan_comment")
+    ]);
     return { ...plan, is_owner: entry.owner, membership_status: entry.status,
+        can_complete: canComplete, can_comment: canComment,
         pinned: Boolean((membersResult.data || []).find(m => m.user_id === userId)?.pinned),
         completed_for_me: plan.status === "completed" || completed.has(userId),
         completed_count: plan.status === "completed" ? activeIds.length : activeIds.filter(id => completed.has(id)).length,
@@ -196,8 +201,17 @@ export default function registerPlans(app,supabase) {
                 if (error) throw error;
                 doneIds = new Set((data || []).map(c => String(c.plan_id)));
             }
+            const chatPermissions = new Map();
+            const linkedIds = [...new Set(combined.filter(p => p.membership_status === "accepted" && p.chat_id).map(p => p.chat_id))];
+            await Promise.all(linkedIds.map(async chatId => {
+                const [can_complete, can_comment] = await Promise.all([
+                    linkedGroupPermission(supabase, chatId, req.user.id, "plan_complete"),
+                    linkedGroupPermission(supabase, chatId, req.user.id, "plan_comment")
+                ]);
+                chatPermissions.set(chatId, { can_complete, can_comment });
+            }));
             return res.json({ success: true, plans: combined.map(p => ({
-                ...p, completed_for_me: p.status === "completed" || doneIds.has(String(p.id))
+                ...p, ...(chatPermissions.get(p.chat_id) || {}), completed_for_me: p.status === "completed" || doneIds.has(String(p.id))
             })) });
         } catch(error) { return failed(res,error); }
     });
