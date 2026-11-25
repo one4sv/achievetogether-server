@@ -1,4 +1,5 @@
 import { authenticateUser } from "../../middleware/token.js";
+import { getHabitAccess } from "../../utils/habitAccess.js";
 
 const validCategories = ["photo", "video", "link", "file"];
 
@@ -136,6 +137,168 @@ export default function (app, supabase) {
 
         return items;
     }
+
+
+    // Library metadata is independent of the loaded message window.
+    const read = async query => {
+        const { data, error } = await query;
+        if (error) throw error;
+        return data || [];
+    };
+    const visible = (chatId, userId) => supabase.from("messages")
+        .select("id,content,created_at,sender_id,redirected_id,entity_type,entity_id,message_files(id,file_url,file_name,file_type,file_size)")
+        .eq("chat_id", chatId).not("hidden", "cs", '{"' + userId + '"}').eq("is_system", false);
+    const categoryOf = file => getCategory(file.file_type) === "file" ? "file" : "media";
+    async function expandRows(rows) {
+        const originals = new Map();
+        const ids = [...new Set(rows.map(row => row.redirected_id).filter(Boolean))];
+        if (ids.length) {
+            for (const original of await read(supabase.from("messages")
+                .select("id,content,entity_type,entity_id,message_files(id,file_url,file_name,file_type,file_size)").in("id", ids))) originals.set(String(original.id), original);
+        }
+        return rows.map(row => ({ row, sources: [row, originals.get(String(row.redirected_id))].filter(Boolean) }));
+    }
+    function libraryItems(row, sources) {
+        const items = [];
+        const seen = new Set();
+        for (const source of sources) {
+            for (const file of source.message_files || []) {
+                const key = "f:" + file.id;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                items.push({ id: row.id + ":" + key, message_id: row.id, url: file.file_url, name: file.file_name || "",
+                    type: file.file_type || "", size: file.file_size || 0, created_at: row.created_at,
+                    sender_id: row.sender_id, category: getCategory(file.file_type) });
+            }
+            for (const url of extractLinks(source.content)) {
+                if (seen.has(url)) continue;
+                seen.add(url);
+                items.push({ id: row.id + ":l:" + items.length, message_id: row.id, url, name: url, type: "text/url",
+                    size: 0, created_at: row.created_at, sender_id: row.sender_id, category: "link" });
+            }
+            if (source.entity_type && source.entity_id) {
+                const key = source.entity_type + ":" + source.entity_id;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    items.push({ id: row.id + ":e:" + key, message_id: row.id, url: "", name: "", type: "entity",
+                        size: 0, created_at: row.created_at, sender_id: row.sender_id, category: "link",
+                        entity_type: source.entity_type, entity_id: String(source.entity_id) });
+                }
+            }
+        }
+        return items;
+    }
+    async function linkedActivity(chatId, userId) {
+        const [habits, plans] = await Promise.all([
+            read(supabase.from("habits").select("id,name,user_id").eq("chat_id", chatId)),
+            read(supabase.from("one_off_plans").select("id,name,owner_id").eq("chat_id", chatId))
+        ]);
+        const allowedHabits = [];
+        for (const habit of habits) {
+            const access = await getHabitAccess(supabase, habit.id, userId);
+            if (access?.can_view) allowedHabits.push({ kind: "habit", id: String(habit.id), name: habit.name });
+        }
+        const membership = plans.length ? await read(supabase.from("one_off_plan_members").select("plan_id")
+            .eq("user_id", userId).eq("status", "accepted").in("plan_id", plans.map(plan => plan.id))) : [];
+        const accepted = new Set(membership.map(row => String(row.plan_id)));
+        const allowedPlans = plans.filter(plan => plan.owner_id === userId || accepted.has(String(plan.id)))
+            .map(plan => ({ kind: "plan", id: String(plan.id), name: plan.name }));
+        const goals = allowedHabits.length ? await read(supabase.from("at_goals").select("*")
+            .in("shared_habit_id", allowedHabits.map(habit => habit.id))) : [];
+        const allowedGoals = [];
+        for (const goal of goals) {
+            // Do not expose other participants' personal instances or private goals.
+            if (goal.template_goal_id && goal.owner_id !== userId) continue;
+            const access = await getHabitAccess(supabase, goal.shared_habit_id, userId);
+            if (!access?.is_member) continue;
+            if (goal.owner_id !== userId && (access.habit.goal_scope !== "shared" || access.habit.goal_completion_mode !== "shared")) continue;
+            allowedGoals.push({ kind: "goal", id: String(goal.id), name: goal.name });
+        }
+        return [...allowedHabits, ...allowedPlans, ...allowedGoals];
+    }
+    app.get("/chat/library/:id", authenticateUser(supabase), async (req, res) => {
+        const userId = req.user?.id, chatId = req.params.id;
+        if (!userId) return res.sendStatus(401);
+        if (!/^\d+$/.test(chatId)) return res.sendStatus(400);
+        res.set("Cache-Control", "private, no-store");
+        try {
+            const members = await read(supabase.from("chat_members").select("is_blocked").eq("chat_id", chatId).eq("user_id", userId).limit(1));
+            if (!members.length || members[0].is_blocked) return res.sendStatus(403);
+            const category = req.query.category;
+            if (category) {
+                if (!["media","link","file"].includes(category)) return res.sendStatus(400);
+                const cursor = req.query.beforeId ? /^(\d+):(\d+)$/.exec(String(req.query.beforeId)) : null;
+                if (req.query.beforeId && (!cursor || !Number.isSafeInteger(Number(cursor[1])) || !Number.isSafeInteger(Number(cursor[2])))) return res.sendStatus(400);
+                let before = cursor ? Number(cursor[1]) : null;
+                let skip = cursor ? Number(cursor[2]) : 0;
+                const result = [];
+                let next = null;
+                outer: for (;;) {
+                    let query = visible(chatId, userId).order("id", { ascending: false }).limit(100);
+                    if (before !== null) query = query.lte("id", before);
+                    const rows = await read(query);
+                    if (!rows.length) break;
+                    for (const {row,sources} of await expandRows(rows)) {
+                        const items = libraryItems(row, sources).filter(item => category === "media" ? ["photo","video"].includes(item.category) : item.category === category);
+                        const start = before === Number(row.id) ? skip : 0;
+                        for (let i = start; i < items.length; i++) {
+                            if (result.length === 40) { next = row.id + ":" + i; break outer; }
+                            result.push(items[i]);
+                        }
+                    }
+                    before = Number(rows[rows.length - 1].id) - 1;
+                    skip = 0;
+                    if (rows.length < 100) break;
+                }
+                return res.json({ success: true, items: await addSenders(result), hasMore: next !== null, nextBeforeId: next });
+            }
+            const files = () => supabase.from("message_files").select("id,messages!inner(chat_id,hidden,is_system)")
+                .eq("messages.chat_id", chatId).eq("messages.is_system", false).not("messages.hidden", "cs", '{"' + userId + '"}').limit(1);
+            const [media, file, link, activity] = await Promise.all([
+                read(files().or("file_type.ilike.image/%,file_type.ilike.video/%")),
+                read(files().not("file_type","ilike","image/%").not("file_type","ilike","video/%")),
+                read(visible(chatId,userId).or("content.ilike.%http://%,content.ilike.%https://%,entity_type.not.is.null").limit(1)),
+                linkedActivity(chatId,userId)
+            ]);
+            const tabs = { media: media.length > 0, file: file.length > 0, link: link.length > 0, activity: activity.length > 0 };
+            // Direct existence probes above avoid walking history; inspect forwarded messages only for missing categories.
+            let before = null;
+            while (!tabs.media || !tabs.file || !tabs.link) {
+                let query = visible(chatId,userId).not("redirected_id","is",null).order("id",{ascending:false}).limit(100);
+                if (before !== null) query = query.lt("id",before);
+                const rows = await read(query);
+                if (!rows.length) break;
+                for (const {row,sources} of await expandRows(rows)) {
+                    for (const item of libraryItems(row,sources)) {
+                        if (["photo","video"].includes(item.category)) tabs.media = true;
+                        else tabs[item.category] = true;
+                    }
+                }
+                before = rows[rows.length-1].id;
+                if (rows.length < 100) break;
+            }
+            const pins = [];
+            let pinBefore = null;
+            for (;;) {
+                let query = visible(chatId,userId).eq("is_pinned",true).order("id",{ascending:false}).limit(100);
+                if (pinBefore !== null) query = query.lt("id",pinBefore);
+                const rows = await read(query);
+                for (const {row,sources} of await expandRows(rows)) {
+                    const source = sources[1] || row;
+                    pins.push({...row, content: row.content || source.content || "", is_pinned:true,
+                        files:(source.message_files || []).map(f => ({url:f.file_url,name:f.file_name,type:f.file_type})),
+                        read_by:[], reactions:[]});
+                }
+                if (rows.length < 100) break;
+                pinBefore = rows[rows.length-1].id;
+            }
+            const namedPins = (await addSenders(pins)).map(pin => ({...pin,sender_name:pin.sender.name,sender_nick:pin.sender.nick}));
+            return res.json({success:true,tabs,activity,pins:namedPins.reverse()});
+        } catch (error) {
+            console.error("Chat library",error?.message);
+            return res.sendStatus(500);
+        }
+    });
 
     app.get("/media/:type/:id", authenticateUser(supabase), async (req, res) => {
         if (!req.user?.id) return res.status(401).json({ success: false, error: "Authentication required" });
