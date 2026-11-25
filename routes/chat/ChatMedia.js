@@ -203,14 +203,29 @@ export default function (app, supabase) {
                 const theirIds = new Set((theirChats || []).map(chat => chat.chat_id));
                 const shared = (myChats || []).filter(chat => theirIds.has(chat.chat_id));
 
-                if (shared.length !== 1) {
-                    return res.status(404).json({
-                        success: false,
-                        error: shared.length ? "Multiple personal chats found" : "Chat not found"
-                    });
+                if (receiver.id === userId) {
+                    // Saved messages is a private chat containing only the caller.
+                    for (const candidate of shared) {
+                        const { count, error: countError } = await supabase
+                            .from("chat_members")
+                            .select("*", { count: "exact", head: true })
+                            .eq("chat_id", candidate.chat_id);
+                        if (countError) throw countError;
+                        if (count === 1) {
+                            chatId = candidate.chat_id;
+                            break;
+                        }
+                    }
+                    if (!chatId) return res.json({ success: true, items: [], hasMore: false, nextBeforeId: null });
+                } else {
+                    if (shared.length !== 1) {
+                        return res.status(404).json({
+                            success: false,
+                            error: shared.length ? "Multiple personal chats found" : "Chat not found"
+                        });
+                    }
+                    chatId = shared[0].chat_id;
                 }
-
-                chatId = shared[0].chat_id;
                 const { data: ownMember, error: ownMemberError } = await supabase
                     .from("chat_members")
                     .select("is_blocked")
