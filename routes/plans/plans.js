@@ -1,3 +1,6 @@
+import multer from "multer";
+import { randomUUID } from "node:crypto";
+import { validKey, validPhoto } from "../../utils/activityImages.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { linkPlanToGroup } from "../../services/planChatLink.js";
 import { sendPlanInvitation, readPlanInvitation, publishPlanInvitation } from "../../services/planInvitations.js";
@@ -120,9 +123,9 @@ async function publicPlanAccess(supabase,plan,userId,share) {
 }
 function publicPlan(plan) {
     // Never expose share_token, participant identities or private completion/comments.
-    const { id,name,description,plan_date,start_time,end_time,timezone,place,tag,kind,
+    const { id,name,description,plan_date,start_time,end_time,timezone,place,tag,avatar_key,kind,
         completion_mode,status,visibility } = plan;
-    return { id,name,description,plan_date,start_time,end_time,timezone,place,tag,kind,
+    return { id,name,description,plan_date,start_time,end_time,timezone,place,tag,avatar_key,kind,
         completion_mode,status,visibility,is_owner:false,membership_status:"viewer" };
 }
 async function areContacts(supabase,one,two) {
@@ -139,6 +142,8 @@ async function areContacts(supabase,one,two) {
 }
 export default function registerPlans(app,supabase) {
     const auth = authenticateUser(supabase);
+    const avatarUpload=multer({storage:multer.memoryStorage(),limits:{files:1,fileSize:800000,fields:1,fieldSize:32,parts:3}});
+    const avatarPath=(id,key)=>"plans/"+id+"/"+key+".jpg";
 
     app.get("/messages/:id/plan-invitation", auth, async(req,res) => {
         if (!signedIn(req,res)) return;
@@ -229,6 +234,54 @@ export default function registerPlans(app,supabase) {
                 return res.status(404).json({ success:false });
             return res.json({ success:true,plan:publicPlan(plan) });
         } catch(error) { return failed(res,error); }
+    });
+
+    app.get("/plans/:id/avatar/:key",auth,async(req,res)=>{
+        const {id,key}=req.params;
+        if(!validId(id) || !validKey(key))return res.sendStatus(404);
+        try {
+            const entry=req.user?.id?await access(supabase,id,req.user.id):null;
+            let plan=entry?.plan;
+            if(entry && entry.status!=="accepted")return res.sendStatus(404);
+            if(!entry){
+                const result=await supabase.from("one_off_plans").select("*").eq("id",id).maybeSingle();
+                if(result.error)throw result.error;
+                plan=result.data;
+                if(!plan || !(await publicPlanAccess(supabase,plan,req.user?.id,req.query?.share)))return res.sendStatus(404);
+            }
+            if(plan.avatar_key!==key)return res.sendStatus(404);
+            const {data,error}=await supabase.storage.from("activity-images").download(avatarPath(id,key));
+            if(error)throw error;
+            res.set({"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"}).type("image/jpeg").send(Buffer.from(await data.arrayBuffer()));
+        }catch(error){return failed(res,error);}
+    });
+    app.put("/plans/:id/avatar",auth,async(req,res,next)=>{
+        if(!signedIn(req,res))return;
+        try {
+            const entry=await access(supabase,req.params.id,req.user.id);
+            if(!entry?.owner || entry.plan.status==="canceled")return res.sendStatus(403);
+            req.planAvatarEntry=entry;
+            next();
+        }catch(error){return failed(res,error);}
+    },avatarUpload.single("avatar"),async(req,res)=>{
+        const plan=req.planAvatarEntry.plan;
+        if(req.file ? !validPhoto(req.file,512) : req.body?.remove!=="true")return res.sendStatus(400);
+        try {
+            const key=req.file?randomUUID():null;
+            if(key){
+                const path=avatarPath(plan.id,key);
+                const reserve=await supabase.from("activity_image_cleanup").insert({path,due_at:new Date(Date.now()+86400000).toISOString()});
+                if(reserve.error)throw reserve.error;
+                const saved=await supabase.storage.from("activity-images").upload(path,req.file.buffer,{contentType:"image/jpeg",upsert:false});
+                if(saved.error)throw saved.error;
+            }
+            let query=supabase.from("one_off_plans").update({avatar_key:key,updated_at:new Date().toISOString()}).eq("id",plan.id).eq("owner_id",req.user.id).neq("status","canceled");
+            query=plan.avatar_key?query.eq("avatar_key",plan.avatar_key):query.is("avatar_key",null);
+            const {data,error}=await query.select("id").maybeSingle();
+            if(error)throw error;
+            if(!data)return res.sendStatus(409);
+            return res.json({success:true,avatar_key:key});
+        }catch(error){return failed(res,error);}
     });
 
     app.patch("/plans/:id",auth,async(req,res) => {

@@ -108,7 +108,7 @@ export default function (app, supabase) {
       const plans = (ownerPlans || []).filter(plan => canSee("plans",
         plan.visibility === "inherit" && rules.plans === "link" ? privacy.token : plan.share_token,
         plan.visibility)).map(plan => ({ id:plan.id,name:plan.name,plan_date:plan.plan_date,start_time:plan.start_time,
-          end_time:plan.end_time,tag:plan.tag,kind:plan.kind,status:plan.status,
+          end_time:plan.end_time,tag:plan.tag,avatar_key:plan.avatar_key,kind:plan.kind,status:plan.status,
           visibility:plan.visibility,membership_status:"viewer",
           share:plan.visibility === "link" || plan.visibility === "inherit" && rules.plans === "link"
             ? req.query?.share : null }));
