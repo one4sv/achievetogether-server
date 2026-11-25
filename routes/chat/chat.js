@@ -19,6 +19,44 @@ export default function (app, supabase) {
     res.send("Chat api is working...");
   });
 
+  // Search the entire visible history of one conversation, independently of the loaded window.
+  app.get("/chat/search/:id", authenticateUser(supabase), async (req, res) => {
+    const actor = req.user?.id;
+    const chatId = req.params.id;
+    const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const before = req.query.before ? Number(req.query.before) : null;
+    if (!actor) return res.sendStatus(401);
+    if (!/^\d+$/.test(chatId) || !query || query.length > 200 || query.includes("\0") ||
+        (before !== null && (!Number.isSafeInteger(before) || before <= 0))) return res.sendStatus(400);
+    try {
+      const { data: member, error: memberError } = await supabase.from("chat_members")
+        .select("is_blocked").eq("chat_id", chatId).eq("user_id", actor).maybeSingle();
+      if (memberError) throw memberError;
+      if (!member || member.is_blocked) return res.sendStatus(403);
+      const like = "%" + query.replace(/[\\%_]/g, "\\  // ====================== GET /chat/:nick ======================") + "%";
+      let request = supabase.from("messages")
+        .select("id,sender_id,content,created_at")
+        .eq("chat_id", chatId).eq("is_system", false)
+        .not("hidden", "cs", `{"${actor}"}`).ilike("content", like)
+        .order("id", { ascending: false }).limit(101);
+      if (before !== null) request = request.lt("id", before);
+      const { data, error } = await request;
+      if (error) throw error;
+      const rows = (data || []).slice(0, 100);
+      const ids = [...new Set(rows.map(row => row.sender_id).filter(Boolean))];
+      const authors = ids.length ? await supabase.from("users").select("id,username,nick").in("id", ids) : {data: []};
+      if (authors.error) throw authors.error;
+      const byId = new Map((authors.data || []).map(user => [user.id, user]));
+      return res.json({success: true, messages: rows.map(row => ({
+        ...row, sender_name: byId.get(row.sender_id)?.username || null,
+        sender_nick: byId.get(row.sender_id)?.nick || null, files: [], is_system: false
+      })), next: (data || []).length > 100 ? rows.at(-1).id : null});
+    } catch (error) {
+      console.error("Chat history search", error);
+      return res.sendStatus(500);
+    }
+  });
+
   // ====================== GET /chat/:nick ======================
   app.get("/chat/:nick", authenticateUser(supabase), async (req, res) => {
     if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
