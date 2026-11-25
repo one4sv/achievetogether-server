@@ -1,0 +1,2 @@
+import test from "node:test";import assert from "node:assert/strict";import {compatiblePostLinks,validPostLink} from "../utils/postLinks.js";
+test("post links require matching goal relations",()=>{assert.equal(compatiblePostLinks(1,2,3,[1],[2]),true);assert.equal(compatiblePostLinks(1,2,null,[],[]),false);assert.equal(compatiblePostLinks(1,null,3,[9],[]),false);assert.equal(compatiblePostLinks(null,null,3,[],[]),true);assert.equal(validPostLink("0"),false);});

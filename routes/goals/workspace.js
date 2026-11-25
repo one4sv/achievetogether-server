@@ -153,6 +153,8 @@ export default function goalWorkspaceRoutes(app,supabase) {
             const zone=goals.length?await ownerGoalZone(supabase,req.user.id,req.query?.timezone):"UTC";
             const {data:links,error:linksError}=goals.length?await supabase.from("at_goal_habit_links").select("goal_id,habit_id").in("goal_id",goals.map(g=>g.id)):{data:[],error:null};
             if(linksError) throw linksError;
+            const planLinks=goals.length?await supabase.from("at_goal_plan_links").select("goal_id,plan_id").in("goal_id",goals.map(g=>g.id)):{data:[],error:null};
+            if(planLinks.error)throw planLinks.error;
             const results=[];
             for(let i=0;i<goals.length;i+=8){
                 results.push(...await Promise.all(goals.slice(i,i+8).map(async g=>{
@@ -162,7 +164,7 @@ export default function goalWorkspaceRoutes(app,supabase) {
                     const ownStages=stages.filter(s=>String(s.goal_id)===String(g.id));
                     const result=await calculateGoalProgress(supabase,g,habit_ids,ownStages,zone);
                     const recentStages=ownStages.filter(s=>s.completed_at && (!result.repeat_period_start || goalDay(s.completed_at,zone)>=result.repeat_period_start)).sort((a,b)=>String(b.completed_at).localeCompare(String(a.completed_at))).slice(0,2);
-                    return {...publicGoalPermissions(result,access),habit_ids,recent_stages:recentStages};
+                    return {...publicGoalPermissions(result,access),habit_ids,plan_ids:(planLinks.data || []).filter(l=>String(l.goal_id)===String(g.id)).map(l=>l.plan_id),recent_stages:recentStages};
                 })));
             }
             return res.json({success:true,goals:results.filter(Boolean)});

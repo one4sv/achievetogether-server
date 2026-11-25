@@ -1,4 +1,6 @@
 import { visiblePosts, signedRows } from "../../utils/postContent.js";
+import { visiblePostExtraLinks } from "../../utils/postLinks.js";
+import { getHabitAccess } from "../../utils/habitAccess.js";
 import { visibleHabitIds } from "../../utils/privacy.js";
 // routes/postsAndFeed.js
 import multer from "multer";
@@ -126,7 +128,7 @@ export default function (app, supabase) {
       }
 
       // --- 11) финальная сборка постов
-      const posts = safePosts.map(p => {
+      const posts = await Promise.all(safePosts.map(async p => {
         const user = safeUsers.find(u => u.id === p.user_id) || {
           id: p.user_id,
           nick: null,
@@ -137,7 +139,7 @@ export default function (app, supabase) {
         const media = p.media;
         const likes = safeParseJSON(p.likes, []);
 
-        const habit = p.habit_id ? (habitById[p.habit_id] || null) : null;
+        const habit = p.habit_id ? (habitById[p.habit_id] || (req.user?.id ? await getHabitAccess(supabase,p.habit_id,req.user.id).then(a=>a?.is_member?a.habit:null) : null)) : null;
         if (habit) habit.done = doneSet.has(String(habit.id));
 
         return {
@@ -145,6 +147,7 @@ export default function (app, supabase) {
           user,
           media,
           habit,
+          ...await visiblePostExtraLinks(supabase,p,req.user?.id,req.query?.share),
           text: p.text ?? "",
           content: p.content ?? null,
           visibility: p.visibility ?? "inherit",
@@ -152,7 +155,7 @@ export default function (app, supabase) {
           created_at: p.created_at,
           comments_count: p.comments_count ?? 0,
         };
-      });
+      }));
 
       return res.json({ success: true, posts });
 
@@ -218,17 +221,18 @@ export default function (app, supabase) {
         }, {});
       }
 
-      const posts = safePosts.map(p => {
+      const posts = await Promise.all(safePosts.map(async p => {
         const media = p.media;
         const likes = safeParseJSON(p.likes, []);
 
-        const habit = p.habit_id ? (habitById[String(p.habit_id)] || null) : null;
+        const habit = p.habit_id ? (habitById[String(p.habit_id)] || (req.user?.id ? await getHabitAccess(supabase,p.habit_id,req.user.id).then(a=>a?.is_member?a.habit:null) : null)) : null;
 
         return {
           id: p.id,
           user: author,
           media,
           habit,
+          ...await visiblePostExtraLinks(supabase,p,req.user?.id,req.query?.share),
           text: p.text ?? "",
           content: p.content ?? null,
           visibility: p.visibility ?? "inherit",
@@ -236,7 +240,7 @@ export default function (app, supabase) {
           created_at: p.created_at,
           comments_count: typeof p.comments_count !== "undefined" ? p.comments_count : 0,
         };
-      });
+      }));
 
       return res.json({ success: true, posts });
     } catch (e) {

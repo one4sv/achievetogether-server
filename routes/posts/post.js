@@ -1,6 +1,8 @@
 import { visiblePosts, signedMedia } from "../../utils/postContent.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { visibleHabitIds } from "../../utils/privacy.js";
+import { visiblePostExtraLinks } from "../../utils/postLinks.js";
+import { getHabitAccess } from "../../utils/habitAccess.js";
 const array = value => {
     try {
         const parsed = typeof value === "string" ? JSON.parse(value) : value;
@@ -41,9 +43,9 @@ export default function postRoute(app, supabase) {
                 // Habit content has independent privacy. Do not expose it through a post.
                 let habit = null;
                 if (post.habit_id) {
-                    const result = await supabase.from("habits").select("*").eq("id", post.habit_id).eq("user_id", post.user_id).maybeSingle();
+                    const result = await supabase.from("habits").select("*").eq("id", post.habit_id).maybeSingle();
                     if (result.error) throw result.error;
-                    if (result.data && (await visibleHabitIds(supabase,[result.data],req.user?.id,req.query?.share)).has(String(result.data.id)))
+                    if (result.data && ((await visibleHabitIds(supabase,[result.data],req.user?.id,req.query?.share)).has(String(result.data.id)) || (req.user?.id && (await getHabitAccess(supabase,result.data.id,req.user.id,req.query?.share))?.is_member)))
                         habit = result.data;
                 }
                 res.json(
@@ -58,6 +60,7 @@ export default function postRoute(app, supabase) {
                             media: signedMedia(supabase, post.media, "posts", post.id, req.query?.share),
                             likes: array(post.likes),
                             habit,
+                            ...await visiblePostExtraLinks(supabase,post,req.user?.id,req.query?.share),
                             created_at: post.created_at,
                             comments_count: post.comments_count ?? 0
                         }

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { validPostLink, validatePostLinks } from "./postLinks.js";
 import path from "path";
 import { parseArray, validateContent, visibilityValues } from "./postContent.js";
 import { normalizeUploadFileName } from "./fileNameEncoding.js";
@@ -26,7 +27,7 @@ export function savePost(supabase, editing) {
             let content;
             let ids;
             let visibility;
-            let habit_id;
+            let habit_id, goal_id, plan_id;
             const text = typeof req.body.text === "string" ? req.body.text.trim() : "";
             try {
                 const requested = parseArray(req.body.keptMedia);
@@ -45,16 +46,14 @@ export function savePost(supabase, editing) {
                 if (!visibilityValues.includes(visibility)) throw new Error("Invalid visibility");
                 habit_id = req.body.habit_id === undefined ? post?.habit_id ?? null
                     : req.body.habit_id === "none" ? null : req.body.habit_id;
-                if (habit_id !== null && !/^\d+$/.test(String(habit_id))) throw new Error("Invalid habit");
+                goal_id = req.body.goal_id === undefined ? post?.goal_id ?? null : req.body.goal_id === "none" ? null : req.body.goal_id;
+                plan_id = req.body.plan_id === undefined ? post?.plan_id ?? null : req.body.plan_id === "none" ? null : req.body.plan_id;
+                if (![habit_id,goal_id,plan_id].every(validPostLink)) throw new Error("Invalid link");
             } catch {
                 return res.status(400).json({ success: false, message: "Invalid post" });
             }
-            if (habit_id) {
-                const { data: habit, error } = await supabase.from("habits").select("id")
-                    .eq("id", habit_id).eq("user_id", user_id).maybeSingle();
-                if (error) throw error;
-                if (!habit) return res.status(400).json({ success: false });
-            }
+            const links={habit_id,goal_id,plan_id};
+            if ((!editing || Object.keys(links).some(k=>String(links[k] ?? "")!==String(post?.[k] ?? ""))) && !(await validatePostLinks(supabase,user_id,links,req.body.timezone))) return res.status(400).json({success:false,message:"Invalid post links"});
             if (!editing) {
                 // Keep the unfinished row private until every upload succeeds.
                 const result = await supabase.from("posts")
@@ -78,7 +77,7 @@ export function savePost(supabase, editing) {
                 media.push({ id: ids[index], name: originalName, type: file.mimetype, url: data.publicUrl });
             }
             const { error } = await supabase.from("posts")
-                .update({ text, content, media, visibility, habit_id }).eq("id", post_id).eq("user_id", user_id);
+                .update({ text, content, media, visibility, habit_id, goal_id, plan_id }).eq("id", post_id).eq("user_id", user_id);
             if (error) throw error;
             committed = true;
             // Remove old objects only after the replacement has been saved successfully.

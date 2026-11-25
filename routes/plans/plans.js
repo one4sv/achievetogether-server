@@ -65,7 +65,7 @@ function failed(res,error) {
     console.error("One-off plans:", error?.code || error?.message || error);
     return res.status(500).json({ success: false, error: "Ошибка обработки плана" });
 }
-async function access(supabase,id,userId) {
+export async function access(supabase,id,userId) {
     if (!validId(id)) return null;
     const { data: plan, error } = await supabase.from("one_off_plans").select("*").eq("id",id).maybeSingle();
     if (error) throw error;
@@ -110,7 +110,7 @@ async function details(supabase,entry,userId) {
                 (plan.status === "completed" || completed.has(u.id))
         })) };
 }
-async function publicPlanAccess(supabase,plan,userId,share) {
+export async function publicPlanAccess(supabase,plan,userId,share) {
     const owner = await ownerPrivacy(supabase,plan.owner_id);
     const relation = await relationship(supabase,userId,plan.owner_id);
     return permitted({ rules:owner.rules,field:"plans",viewerId:userId,ownerId:plan.owner_id,
