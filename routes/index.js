@@ -19,6 +19,7 @@ import pushRoutes from "./settings/push.js";
 import updatesettingsRoutes from "./settings/updatesettings.js";
 import updatehabitRoutes from "./habits/updatehabit.js";
 import contactsRoutes from "./chat/contacts.js";
+import contactAliasRoutes from "./chat/contact-aliases.js";
 import globalSearchRoutes from "./search/global.js";
 import chatRoutes from "./chat/chat.js";
 import sharedEntityRoutes from "./chat/shared-entity.js";
@@ -93,6 +94,7 @@ export default function registerAllRoutes(app, supabase) {
     updatesettingsRoutes(app, supabase);
     updatehabitRoutes(app, supabase);
     contactsRoutes(app, supabase);
+    contactAliasRoutes(app, supabase);
     globalSearchRoutes(app, supabase);
     chatRoutes(app, supabase);
     sharedEntityRoutes(app, supabase);
