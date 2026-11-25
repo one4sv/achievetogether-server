@@ -1,6 +1,6 @@
 import multer from "multer";
 import { randomUUID } from "node:crypto";
-import { validKey, validPhoto } from "../../utils/activityImages.js";
+import { keys, validKey, validPhoto } from "../../utils/activityImages.js";
 import { authenticateUser } from "../../middleware/token.js";
 import { linkPlanToGroup } from "../../services/planChatLink.js";
 import { sendPlanInvitation, readPlanInvitation, publishPlanInvitation } from "../../services/planInvitations.js";
@@ -143,6 +143,8 @@ async function areContacts(supabase,one,two) {
 export default function registerPlans(app,supabase) {
     const auth = authenticateUser(supabase);
     const avatarUpload=multer({storage:multer.memoryStorage(),limits:{files:1,fileSize:800000,fields:1,fieldSize:32,parts:3}});
+    const commentUpload=multer({storage:multer.memoryStorage(),limits:{files:4,fileSize:800000,fields:4,fieldSize:2048,parts:9}});
+    const commentPhotoPath=(id,key)=>"plans/"+id+"/comments/"+key+".jpg";
     const avatarPath=(id,key)=>"plans/"+id+"/"+key+".jpg";
 
     app.get("/messages/:id/plan-invitation", auth, async(req,res) => {
@@ -345,7 +347,7 @@ export default function registerPlans(app,supabase) {
                 if (error) throw error;
             } else {
                 const { error } = await supabase.from("one_off_plan_completions")
-                    .delete().eq("plan_id",entry.plan.id).eq("user_id",req.user.id);
+                    .delete().eq("plan_id",entry.plan.id).eq("user_id",req.user.id).eq("photo_ids","{}");
                 if (error) throw error;
             }
             if (entry.plan.completion_mode === "shared") {
@@ -473,7 +475,7 @@ export default function registerPlans(app,supabase) {
             if (!entry) return res.status(404).json({ success:false });
             if (entry.status !== "accepted") return res.status(403).json({ success:false });
             const [{ data: comments,error },{ data: members,error:membersError }] = await Promise.all([
-                supabase.from("one_off_plan_comments").select("user_id,comment,updated_at")
+                supabase.from("one_off_plan_comments").select("user_id,comment,updated_at,photo_ids")
                     .eq("plan_id",entry.plan.id).order("updated_at",{ ascending:false }),
                 supabase.from("one_off_plan_members").select("user_id,status").eq("plan_id",entry.plan.id)
             ]);
@@ -486,14 +488,70 @@ export default function registerPlans(app,supabase) {
                     .in("id",active.map(item => item.user_id)) :
                 { data:[],error:null };
             if (usersError) throw usersError;
+            res.set("Cache-Control","private, no-store");
+            const own=active.find(item => item.user_id === req.user.id);
             return res.json({
                 success:true,
-                comment:active.find(item => item.user_id === req.user.id)?.comment || "",
+                photos:own?.photo_ids || [],text:own?.comment || "",
+                comment:own?.comment || "",
                 comments:entry.plan.kind === "shared" ? active.map(item => ({
                     ...item, user:(users || []).find(user => user.id === item.user_id) || null
                 })) : []
             });
         } catch(error) { return failed(res,error); }
+    });
+
+    app.get("/plans/:id/comment-photos/:key",auth,async(req,res)=>{
+        if(!signedIn(req,res))return;
+        if(!validKey(req.params.key))return res.sendStatus(404);
+        try {
+            const entry=await access(supabase,req.params.id,req.user.id);
+            if(!entry || entry.status!=="accepted")return res.sendStatus(404);
+            const {data,error}=await supabase.from("one_off_plan_comments").select("user_id").eq("plan_id",entry.plan.id).contains("photo_ids",[req.params.key]).limit(1);
+            if(error)throw error;
+            if(!data?.length)return res.sendStatus(404);
+            const author=data[0].user_id;
+            if(author!==req.user.id){
+                if(entry.plan.kind!=="shared")return res.sendStatus(404);
+                const authorAccess=await access(supabase,entry.plan.id,author);
+                if(authorAccess?.status!=="accepted" || (await relationship(supabase,req.user.id,author)).blocked)return res.sendStatus(404);
+            }
+            const file=await supabase.storage.from("activity-images").download(commentPhotoPath(entry.plan.id,req.params.key));
+            if(file.error)throw file.error;
+            return res.set({"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"}).type("image/jpeg").send(Buffer.from(await file.data.arrayBuffer()));
+        }catch(error){return failed(res,error);}
+    });
+    app.post("/plans/:id/comment-photos",auth,async(req,res,next)=>{
+        if(!signedIn(req,res))return;
+        try {
+            const entry=await access(supabase,req.params.id,req.user.id);
+            if(!entry || entry.status!=="accepted" || entry.plan.status==="canceled")return res.sendStatus(403);
+            req.planCommentEntry=entry;next();
+        }catch(error){return failed(res,error);}
+    },commentUpload.array("photos",4),async(req,res)=>{
+        const expected=keys(req.body.expected),keep=keys(req.body.keep),text=req.body.text,files=req.files || [];
+        if(!expected || !keep || !keep.every(k=>expected.includes(k)) || keep.length+files.length>4 || typeof text!=="string" || text.length>200 || !files.every(f=>validPhoto(f,1600)))return res.sendStatus(400);
+        try {
+            const id=req.planCommentEntry.plan.id,added=[];
+            for(const file of files){
+                const key=randomUUID(),path=commentPhotoPath(id,key);
+                const reserve=await supabase.from("activity_image_cleanup").insert({path,due_at:new Date(Date.now()+86400000).toISOString()});
+                if(reserve.error)throw reserve.error;
+                const result=await supabase.storage.from("activity-images").upload(path,file.buffer,{contentType:"image/jpeg",upsert:false});
+                if(result.error)throw result.error;
+                added.push(key);
+            }
+            const current=await access(supabase,id,req.user.id);
+            if(current?.status!=="accepted" || current.plan.status==="canceled")return res.sendStatus(403);
+            const {error}=await supabase.rpc("save_plan_comment_images",{p_actor:req.user.id,p_plan:Number(id),p_text:text,p_expected:expected,p_keep:keep,p_new:added});
+            if(error)throw error;
+            return res.json({success:true,photos:[...keep,...added]});
+        }catch(error){
+            if(error.code==="40001")return res.sendStatus(409);
+            if(error.code==="42501")return res.sendStatus(403);
+            if(error.code==="22023")return res.sendStatus(400);
+            return failed(res,error);
+        }
     });
 
     app.post("/plans/:id/comment",auth,async(req,res) => {
