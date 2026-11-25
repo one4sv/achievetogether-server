@@ -65,7 +65,7 @@ function mockedPlanServer(membershipStatus = null) {
     }};
     const routes = new Map();
     const app = {};
-    for (const method of ["get","post","patch","delete"]) {
+    for (const method of ["get","post","put","patch","delete"]) {
         app[method] = (path,...handlers) => routes.set(method.toUpperCase() + " " + path,handlers.at(-1));
     }
     registerPlans(app,supabase);
@@ -230,7 +230,7 @@ test("owner invitation upgrades a personal plan, exposes pending status only to 
     }};
     const routes = new Map();
     const app = {};
-    for (const method of ["get", "post", "patch", "delete"]) {
+    for (const method of ["get", "post", "put", "patch", "delete"]) {
         app[method] = (path, ...handlers) => routes.set(method.toUpperCase() + " " + path, handlers.at(-1));
     }
     registerPlans(app, supabase);

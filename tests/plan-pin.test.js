@@ -34,7 +34,7 @@ function server() {
     }};
     const routes = new Map();
     const app = {};
-    for (const method of ["get","post","patch","delete"])
+    for (const method of ["get","post","put","patch","delete"])
         app[method] = (path,...handlers) => routes.set(method.toUpperCase()+" "+path, handlers.at(-1));
     registerPlans(app,supabase);
     const send = async (userId, body) => {

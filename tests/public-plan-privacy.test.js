@@ -34,7 +34,7 @@ function makeApp(visibility, overall = "nobody") {
     }};
     const routes = new Map();
     const app = {};
-    for (const name of ["get","post","patch","delete"])
+    for (const name of ["get","post","put","patch","delete"])
         app[name] = (key,...handlers) => routes.set(name.toUpperCase() + " " + key,handlers.at(-1));
     registerPlans(app,supabase);
     const request = async (share,userId = null) => {
