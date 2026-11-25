@@ -33,7 +33,7 @@ export default function (app, supabase) {
         .select("is_blocked").eq("chat_id", chatId).eq("user_id", actor).maybeSingle();
       if (memberError) throw memberError;
       if (!member || member.is_blocked) return res.sendStatus(403);
-      const like = "%" + query.replace(/[\\%_]/g, "\\  // ====================== GET /chat/:nick ======================") + "%";
+      const like = "%" + query.replace(/[\\%_]/g, character => "\\" + character) + "%";
       let request = supabase.from("messages")
         .select("id,sender_id,content,created_at")
         .eq("chat_id", chatId).eq("is_system", false)
