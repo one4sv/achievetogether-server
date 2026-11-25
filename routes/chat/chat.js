@@ -296,6 +296,7 @@ export default function (app, supabase) {
           name: chat.name,
           avatar_url: chat.avatar_url,
           is_group: true,
+          can_send_messages: await hasServerPermission(supabase, chatId, userId, PERMS.send_messages),
           members: (members || []).map((m) => ({
             id: m.id,
             nick: m.nick,
@@ -464,6 +465,9 @@ export default function (app, supabase) {
       const { data: destinationChat, error: destinationError } = await supabase.from("chats")
         .select("is_group").eq("id", chatId).maybeSingle();
       if (destinationError || !destinationChat) throw destinationError || new Error("Chat not found");
+      if (destinationChat.is_group && !(await hasServerPermission(supabase, chatId, senderId, PERMS.send_messages))) {
+        return res.status(403).json({ success: false, error: "У вас нет прав писать в данную беседу" });
+      }
       if (!destinationChat.is_group) {
         const { data: participants, error: participantsError } = await supabase.from("chat_members")
           .select("user_id, is_blocked").eq("chat_id", chatId);

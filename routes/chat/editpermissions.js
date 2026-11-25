@@ -1,24 +1,9 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { hasServerPermission } from "../../utils/hasPermission.js";
+import { broadcastGroupUpdated } from "../../realtime/ws.js";
 import { PERMS } from "../../config/permissions.js";
 
-const PERMISSION_KEYS = [
-  "habit_complete",
-  "habit_comment",
-  "habit_edit_blocks",
-  "habit_edit_info",
-  "habit_invite",
-  "change_avatar",
-  "change_name",
-  "change_desc",
-  "manage_roles",
-  "can_invite_users",
-  "kick_users",
-  "ban_users",
-  "delete_others",
-  "pin_messages",
-  "redirect_messages"
-];
+const PERMISSION_KEYS = Object.values(PERMS);
 
 export default function (app, supabase) {
   // Существующий GET /getpermissions/:id остаётся без изменений
@@ -135,7 +120,7 @@ export default function (app, supabase) {
               if (value.trim().toLowerCase() === "owner") throw new Error("Имя owner зарезервировано");
               await supabase.from("chat_roles").update({ name: value.trim() }).eq("id", roleId);
             } else if (label === "rank") {
-              if (typeof value !== "number" || value < 1 || value > 99) throw new Error("Неверный ранг");
+              if (!Number.isInteger(value) || value < 1 || value > 99 || (!isOwner && value >= effectiveMyRank)) throw new Error("Неверный ранг");
               await supabase.from("chat_roles").update({ rank: value }).eq("id", roleId);
             } else if (label === "desc") {
               await supabase.from("chat_roles").update({ desc: value ?? null }).eq("id", roleId);
@@ -174,6 +159,7 @@ export default function (app, supabase) {
               if (value && (!roleMap[String(value)] || roleMap[String(value)].is_owner_role)) {
                 throw new Error("Нельзя назначить системную роль owner");
               }
+              if (!isOwner && value && roleMap[String(value)].rank >= effectiveMyRank) throw new Error("Недостаточный ранг для назначения роли");
               if (targetMember.user_id === chat.creator_id) throw new Error("Роль владельца нельзя переназначить");
               await supabase
                 .from("chat_members")
@@ -181,7 +167,7 @@ export default function (app, supabase) {
                 .eq("user_id", memberUserId)
                 .eq("chat_id", groupId);
             } else if (PERMISSION_KEYS.includes(label)) {
-              if (typeof value !== "boolean") throw new Error("Override разрешения должен быть boolean");
+              if (value !== null && typeof value !== "boolean") throw new Error("Некорректное индивидуальное разрешение");
               const { data: memberData } = await supabase
                 .from("chat_members")
                 .select("permission_overrides")
@@ -190,7 +176,8 @@ export default function (app, supabase) {
                 .single();
 
               const overrides = memberData?.permission_overrides || {};
-              overrides[label] = value;
+              if (value === null) delete overrides[label];
+              else overrides[label] = value;
               await supabase
                 .from("chat_members")
                 .update({ permission_overrides: overrides })
@@ -203,6 +190,7 @@ export default function (app, supabase) {
         }
       }
 
+      await broadcastGroupUpdated(groupId);
       if (errors.length > 0) {
         return res.status(400).json({ success: false, error: "Частичные ошибки при применении изменений", details: errors });
       }

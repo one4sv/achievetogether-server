@@ -5,7 +5,7 @@ import multer from "multer"; // ← добавьте импорт
 import crypto from "crypto";
 import { broadcastGroupUpdated, broadcastNewMessage } from "../../realtime/ws.js";
 import { hasServerPermission } from "../../utils/hasPermission.js";
-import { PERMS } from "../../config/permissions.js";
+import { PERMS, rolePermission } from "../../config/permissions.js";
 
 const uploadNone = multer(); // ← инициализация multer
 const ALL_PERM_KEYS = Object.values(PERMS);
@@ -30,7 +30,7 @@ export default function (app, supabase) {
 
       const { data: group, error: groupError } = await supabase
         .from("chats")
-        .select("id, name, avatar_url, desc, invite_token, invite_expires_at")
+        .select("id, name, avatar_url, desc, invite_token, invite_expires_at, creator_id")
         .eq("id", groupId)
         .single();
 
@@ -46,7 +46,7 @@ export default function (app, supabase) {
       // 3. Участники группы (с role из chat_members)
       const { data: groupMembers } = await supabase
         .from("chat_members")
-        .select("user_id, role_id")
+        .select("user_id, role_id, permission_overrides")
         .eq("chat_id", groupId);
 
       const memberUserIds = groupMembers?.map(m => m.user_id) || [];
@@ -59,21 +59,25 @@ export default function (app, supabase) {
       // Получаем имена ролей
       const roleIds = groupMembers?.map(m => m.role_id).filter(Boolean) || [];
       const { data: roles } = roleIds.length > 0
-        ? await supabase.from("chat_roles").select("id, name").in("id", roleIds)
+        ? await supabase.from("chat_roles").select("id, name, rank, permissions").eq("chat_id", groupId).in("id", roleIds)
         : { data: [] };
 
       const roleMap = {};
-      roles?.forEach(r => roleMap[r.id] = r.name);
+      roles?.forEach(r => roleMap[r.id] = r);
 
       const members = (memberUsers || []).map(u => {
         const gm = groupMembers.find(g => g.user_id === u.id);
+        const role = roleMap[gm?.role_id];
+        const differences = Object.fromEntries(ALL_PERM_KEYS.filter(key => typeof gm?.permission_overrides?.[key] === "boolean" && gm.permission_overrides[key] !== rolePermission(role?.permissions, key)).map(key => [key, gm.permission_overrides[key]]));
         return {
           id: u.id,
           name: u.username || null,
           nick: u.nick,
           avatar_url: u.avatar_url || null,
           role_id: gm?.role_id || null,
-          role_name: gm?.role_id ? roleMap[gm.role_id] || "member" : "member",
+          role_name: u.id === group.creator_id ? "owner" : role?.name || "member",
+          role_rank: u.id === group.creator_id ? 100 : role?.rank ?? 0,
+          permission_differences: u.id === group.creator_id ? {} : differences,
           last_online: u.last_online || null,
         };
       });

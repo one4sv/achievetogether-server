@@ -1,3 +1,5 @@
+import { rolePermission } from "../config/permissions.js";
+
 export async function hasServerPermission(supabase, chatId, userId, permKey) {
   // Владелец чата может всё
   const { data: chat } = await supabase
@@ -32,5 +34,12 @@ export async function hasServerPermission(supabase, chatId, userId, permKey) {
 
   // overrides > role > false
   if (permKey in overrides) return overrides[permKey] === true;
-  return rolePerms[permKey] === true;
+  return rolePermission(rolePerms, permKey);
+}
+// Independently invited plan participants outside the group retain their existing ACL.
+export async function linkedGroupPermission(supabase, chatId, userId, key) {
+  if (!chatId) return true;
+  const { data, error } = await supabase.from("chat_members").select("id").eq("chat_id", chatId).eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  return !data || await hasServerPermission(supabase, chatId, userId, key);
 }

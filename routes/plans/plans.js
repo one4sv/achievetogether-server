@@ -1,3 +1,4 @@
+import { linkedGroupPermission } from "../../utils/hasPermission.js";
 import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { keys, validKey, validPhoto } from "../../utils/activityImages.js";
@@ -339,6 +340,7 @@ export default function registerPlans(app,supabase) {
             if (!entry) return res.status(404).json({ success: false });
             if (entry.status !== "accepted") return res.status(403).json({ success: false });
             if (entry.plan.status === "canceled") return res.status(409).json({ success: false });
+            if (!await linkedGroupPermission(supabase, entry.plan.chat_id, req.user.id, "plan_complete")) return res.status(403).json({ success:false });
             if (entry.plan.completion_mode === "shared" && !entry.owner) return res.status(403).json({ success: false });
             if (req.body.completed) {
                 const { error } = await supabase.from("one_off_plan_completions")
@@ -526,6 +528,7 @@ export default function registerPlans(app,supabase) {
         try {
             const entry=await access(supabase,req.params.id,req.user.id);
             if(!entry || entry.status!=="accepted" || entry.plan.status==="canceled")return res.sendStatus(403);
+            if (!await linkedGroupPermission(supabase, entry.plan.chat_id, req.user.id, "plan_comment")) return res.status(403).json({ success:false });
             req.planCommentEntry=entry;next();
         }catch(error){return failed(res,error);}
     },commentUpload.array("photos",4),async(req,res)=>{
@@ -543,6 +546,7 @@ export default function registerPlans(app,supabase) {
             }
             const current=await access(supabase,id,req.user.id);
             if(current?.status!=="accepted" || current.plan.status==="canceled")return res.sendStatus(403);
+            if (!await linkedGroupPermission(supabase, current.plan.chat_id, req.user.id, "plan_comment")) return res.status(403).json({ success:false });
             const {error}=await supabase.rpc("save_plan_comment_images",{p_actor:req.user.id,p_plan:Number(id),p_text:text,p_expected:expected,p_keep:keep,p_new:added});
             if(error)throw error;
             return res.json({success:true,photos:[...keep,...added]});
@@ -565,6 +569,7 @@ export default function registerPlans(app,supabase) {
             if (!entry) return res.status(404).json({ success:false });
             if (entry.status !== "accepted" || entry.plan.status === "canceled")
                 return res.status(403).json({ success:false });
+            if (!await linkedGroupPermission(supabase, entry.plan.chat_id, req.user.id, "plan_comment")) return res.status(403).json({ success:false });
             if (!comment.trim()) {
                 const { error } = await supabase.from("one_off_plan_comments")
                     .delete().eq("plan_id",entry.plan.id).eq("user_id",req.user.id);

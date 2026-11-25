@@ -1,6 +1,6 @@
 import { authenticateUser } from "../../middleware/token.js";
 import { hasServerPermission } from "../../utils/hasPermission.js";  // если нужно для доп. проверок
-import { PERMS } from "../../config/permissions.js";
+import { PERMS, rolePermission } from "../../config/permissions.js";
 
 export default function (app, supabase) {
   app.get("/getpermissions/:id", authenticateUser(supabase), async (req, res) => {
@@ -40,17 +40,13 @@ export default function (app, supabase) {
         .select("id, name, permissions, is_editable, desc, is_default, rank")
         .eq("chat_id", groupId);
 
-      const allPermissionKeys = [
-        "habit_complete", "habit_comment", "habit_edit_blocks", "habit_edit_info", "habit_invite",
-        "change_avatar", "change_name", "change_desc", "manage_roles", "can_invite_users",
-        "kick_users", "ban_users", "delete_others", "pin_messages", "redirect_messages"
-      ];
+      const allPermissionKeys = Object.values(PERMS);
       const roles = (rawRoles || []).map(r => ({
         role_id: r.id.toString(),
         role_name: r.name,
         permissions: r.name?.trim().toLowerCase() === "owner"
           ? Object.fromEntries(allPermissionKeys.map(key => [key, true]))
-          : r.permissions || {},
+          : Object.fromEntries(allPermissionKeys.map(key => [key, rolePermission(r.permissions, key)])),
         is_editable:r.is_editable,
         desc:r.desc || "",
         is_default:r.is_default,
@@ -85,23 +81,7 @@ export default function (app, supabase) {
       const members = rawMembers.map(rm => {
         const user = userMap[rm.user_id] || {};
 
-        let effectivePerms = {
-          habit_complete: false,
-          habit_comment: false,
-          habit_edit_blocks: false,
-          habit_edit_info: false,
-          habit_invite: false,
-          change_avatar: false,
-          change_name: false,
-          change_desc: false,
-          pin_messages: false,
-          redirect_messages: false,
-          delete_others: false,
-          manage_roles: false,
-          kick_users: false,
-          ban_users: false,
-          can_invite_users: false,
-        };
+        let effectivePerms = Object.fromEntries(allPermissionKeys.map(key => [key, rolePermission({}, key)]));
 
         if (rm.user_id === ownerId) {
           Object.keys(effectivePerms).forEach(k => {
@@ -132,6 +112,7 @@ export default function (app, supabase) {
           last_online: user.last_online || null,
           role_name: role ? role.name : "member",
           permissions: effectivePerms,
+          permission_overrides: rm.user_id === ownerId ? {} : rm.permission_overrides || {},
         };
       });
 
