@@ -127,7 +127,7 @@ export default function globalSearchRoutes(app, supabase) {
                 for (const habit of data || []) {
                     const access = await getHabitAccess(supabase, habit.id, actor);
                     if (access?.can_view) add(result("habit", habit.id, habit.name, "/habit/" + habit.id, "", habit.created_at,
-                        { tag: access.habit?.tag || null, mine: idOf(habit.user_id) === idOf(actor) }));
+                        { tag: access.habit?.tag || null, avatar_url: access.habit?.avatar_key ? "/api/habits/" + access.habit.id + "/avatar/" + access.habit.avatar_key : null, mine: idOf(habit.user_id) === idOf(actor) }));
                 }
             }
             if (wants("plan")) {

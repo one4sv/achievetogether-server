@@ -31,3 +31,10 @@ test("global search prioritizes owned activities, plans and posts within a categ
     assert.deepEqual(sortGlobalSearchResults(rows.slice(), "ms").map(row => row.id),
         ["other-new","mine-new","mine-old"]);
 });
+
+
+test("habit search exposes the authorized activity avatar alongside its tag", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../routes/search/global.js", import.meta.url), "utf8");
+    assert.match(source, /if \(access\?\.can_view\) add\(result\("habit",[\s\S]*?avatar_url: access\.habit\?\.avatar_key \? "\/api\/habits\/" \+ access\.habit\.id \+ "\/avatar\/" \+ access\.habit\.avatar_key/);
+});
