@@ -174,7 +174,10 @@ export default function (app, supabase) {
                 if (seen.has(url)) continue;
                 seen.add(url);
                 items.push({ id: row.id + ":l:" + items.length, message_id: row.id, url, name: url, type: "text/url",
-                    size: 0, created_at: row.created_at, sender_id: row.sender_id, category: "link" });
+                    size: 0, created_at: row.created_at, sender_id: row.sender_id, category: "link",
+                    files: (source.message_files || []).map(file => ({
+                        url: file.file_url, name: file.file_name || "", type: file.file_type || "", message_id: String(row.id)
+                    })) });
             }
             if (source.entity_type && source.entity_id) {
                 const key = source.entity_type + ":" + source.entity_id;
