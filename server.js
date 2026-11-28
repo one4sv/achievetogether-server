@@ -8,6 +8,7 @@ import { startGoalWorker } from "./services/goalWorker.js";
 import { startPlanReminderWorker } from "./services/planReminderWorker.js";
 import { startAccountStorageCleanup } from "./services/accountStorageCleanup.js";
 import { startFeedbackOutboxWorker } from "./services/feedbackOutbox.js";
+import { ensureChatMediaLimit } from "./utils/chatMediaLimit.js";
 
 process.stdout.setDefaultEncoding("utf8");
 process.stderr.setDefaultEncoding("utf8");
@@ -17,6 +18,8 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY || !process.env.JWT_S
 }
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+// Update only the known legacy private media bucket via the supported Storage API.
+await ensureChatMediaLimit(supabase);
 const app = createApp(supabase);
 const server = createServer(app);
 initWebSocket(supabase, server);

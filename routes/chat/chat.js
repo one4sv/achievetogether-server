@@ -11,9 +11,18 @@ import { originalAssetUrl } from "../system/private-assets.js";
 import { hasServerPermission } from "../../utils/hasPermission.js";
 import { PERMS } from "../../config/permissions.js";
 import { sharedEntityPreview } from "../../utils/sharedEntity.js";
+import { CHAT_MEDIA_LIMIT, chatAttachmentStorage } from "../../utils/chatMediaLimit.js";
 
 export default function (app, supabase) {
-  const upload = multer({ storage: multer.memoryStorage(), limits: { files: 20, fileSize: 10 * 1024 * 1024, fieldSize: 2 * 1024 * 1024 } });
+  const upload = multer({ storage: chatAttachmentStorage, limits: { files: 20, fileSize: CHAT_MEDIA_LIMIT, fieldSize: 2 * 1024 * 1024 } });
+  const parseAttachments = (req, res, next) => {
+    upload.array("files")(req, res, error => {
+      if (error?.code === "LIMIT_FILE_SIZE" || error?.code === "CHAT_TOTAL_FILE_SIZE") {
+        return res.status(413).json({ success: false, code: "CHAT_FILE_LIMIT", error: "Вложения одного сообщения не должны превышать 50 МБ суммарно" });
+      }
+      next(error);
+    });
+  };
 
   app.get("/chat", (req, res) => {
     res.send("Chat api is working...");
@@ -357,7 +366,7 @@ export default function (app, supabase) {
   });
 
   // ====================== POST /chat (отправка сообщения) ======================
-  app.post("/chat", authenticateUser(supabase), upload.array("files"), async (req, res) => {
+  app.post("/chat", authenticateUser(supabase), parseAttachments, async (req, res) => {
     if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id: senderId } = req.user;
     const { receiver_nick, chat_id: reqChatId, text, answer_id } = req.body;
@@ -730,7 +739,7 @@ export default function (app, supabase) {
   });
 
   // ====================== PATCH /messages/:id ======================
-  app.patch("/messages/:id", authenticateUser(supabase), upload.array("files"), async (req, res) => {
+  app.patch("/messages/:id", authenticateUser(supabase), parseAttachments, async (req, res) => {
     if (!req.user?.id) return res.status(401).json({ success: false, error: "Не авторизован" });
     const { id: userId } = req.user;
     const messageId = parseInt(req.params.id);
